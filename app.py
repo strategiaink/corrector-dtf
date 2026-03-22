@@ -15,7 +15,7 @@ except ImportError:
 # CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: ESTILOS Y COLORES
+# CSS: ESTILOS
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -24,10 +24,7 @@ st.markdown("""
     .sidebar-title { color: white; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
     .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; display: block; }
     
-    /* Botones */
-    .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; height: 3em; margin-bottom: 10px; }
-    div.stButton > button:first-child { background-color: #d4ff00 !important; color: black !important; }
-    .btn-reset > div > button { background-color: #444 !important; color: white !important; }
+    .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; height: 3em; margin-top: 10px; }
     .btn-png > div > button { background-color: #24a148 !important; color: white !important; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; }
     
@@ -54,17 +51,17 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         
         # 1. ANALIZADOR (ARRIBA DE TODO)
-        pixeles = np.array(img_input)
-        alpha = pixeles[:, :, 3]
-        if np.any((alpha > 0) & (alpha < 255)):
+        pixeles_orig = np.array(img_input)
+        alpha_orig = pixeles_orig[:, :, 3]
+        if np.any((alpha_orig > 0) & (alpha_orig < 255)):
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-box status-clean">✅ LIMPIO (SIN SEMITRANSPARENCIAS)</div>', unsafe_allow_html=True)
 
-        # 2. SECCIÓN VISOR
+        # 2. SECCIÓN VISOR (ESTADO ANTERIOR)
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
-        fnd = st.selectbox("Fondo del área de trabajo", ["Negro", "Blanco", "Transparente (Gris)"])
-        bg_css = {"Transparente (Gris)": "#eeeeee", "Blanco": "#ffffff", "Negro": "#000000"}[fnd]
+        fnd = st.selectbox("Fondo del área de trabajo", ["Negro", "Blanco", "Transparente"])
+        bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[fnd]
 
         # 3. TAMAÑO Y RESOLUCIÓN
         st.markdown('<span class="step-label">1. Tamaño y Resolución</span>', unsafe_allow_html=True)
@@ -97,53 +94,39 @@ with st.sidebar:
         f_w, f_h = int((w_cm / 2.54) * dpi_target), int((h_cm / 2.54) * dpi_target)
         img_resized = img_input.resize((f_w, f_h), resample=Image.LANCZOS)
         
-        # 4. LIMPIEZA Y BOTONES DE ACCIÓN
+        # 4. LIMPIEZA AUTOMÁTICA (SIN BOTÓN)
         st.markdown('<span class="step-label">2. Corrección de Bordes</span>', unsafe_allow_html=True)
         umbral = st.slider("Umbral de corte", 1, 254, 128)
         
-        if st.button("APLICAR CORRECCIÓN"):
-            datos = np.array(img_resized)
-            nuevo_a = np.where(datos[:,:,3] < umbral, 0, 255).astype(np.uint8)
-            st.session_state['final'] = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
-
-        # BOTÓN REHACER (RESET) RESTAURADO
-        st.markdown('<div class="btn-reset">', unsafe_allow_html=True)
-        if st.button("REHACER (REVERTIR CAMBIOS)"):
-            if 'final' in st.session_state:
-                del st.session_state['final']
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        # PROCESADO EN TIEMPO REAL
+        datos = np.array(img_resized)
+        nuevo_a = np.where(datos[:,:,3] < umbral, 0, 255).astype(np.uint8)
+        img_final = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
 
         # 5. DESCARGAS
-        if 'final' in st.session_state:
-            st.markdown("---")
-            nombre = archivo.name.rsplit('.', 1)[0].upper()
-            
-            st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-            b_png = io.BytesIO()
-            st.session_state['final'].save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
-            st.download_button("📥 DESCARGAR PNG", b_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+        st.markdown("---")
+        nombre = archivo.name.rsplit('.', 1)[0].upper()
+        
+        st.markdown('<div class="btn-png">', unsafe_allow_html=True)
+        b_png = io.BytesIO()
+        img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
+        st.download_button("📥 DESCARGAR PNG", b_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        if pdf_disponible:
+            st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
+            b_pdf = io.BytesIO()
+            pts_w, pts_h = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
+            c = pdf_canvas.Canvas(b_pdf, pagesize=(pts_w, pts_h))
+            t = io.BytesIO(); img_final.save(t, format="PNG")
+            c.drawImage(ImageReader(t), 0, 0, width=pts_w, height=pts_h, mask='auto'); c.save()
+            st.download_button("📄 DESCARGAR PDF", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
-            
-            if pdf_disponible:
-                st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
-                b_pdf = io.BytesIO()
-                pts_w, pts_h = (st.session_state['final'].size[0] * 72 / dpi_target), (st.session_state['final'].size[1] * 72 / dpi_target)
-                c = pdf_canvas.Canvas(b_pdf, pagesize=(pts_w, pts_h))
-                t = io.BytesIO(); st.session_state['final'].save(t, format="PNG")
-                c.drawImage(ImageReader(t), 0, 0, width=pts_w, height=pts_h, mask='auto'); c.save()
-                st.download_button("📄 DESCARGAR PDF", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
-                st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR ESTABLE CON ZOOM FOCALIZADO ---
+# --- VISOR CON ZOOM FOCALIZADO Y ACTUALIZACIÓN DINÁMICA ---
 if archivo:
-    img_v = st.session_state['final'] if 'final' in st.session_state else img_resized
-    if 'final' not in st.session_state:
-        v_px = np.array(img_v)
-        v_px[(v_px[:,:,3] > 0) & (v_px[:,:,3] < 255)] = [255, 0, 255, 255]
-        img_v = Image.fromarray(v_px)
-
-    buf = io.BytesIO(); img_v.save(buf, format="PNG")
+    buf = io.BytesIO()
+    img_final.save(buf, format="PNG")
     img_64 = base64.b64encode(buf.getvalue()).decode()
     
     st.components.v1.html(f"""
