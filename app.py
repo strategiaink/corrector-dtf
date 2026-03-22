@@ -12,99 +12,120 @@ try:
 except ImportError:
     pdf_disponible = False
 
-# CONFIGURACIÓN DE PÁGINA
-st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide")
+# CONFIGURACIÓN DE PÁGINA (Layout Wide para recuperar espacio)
+st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: ESTILO INTERFAZ
+# CSS: RECUPERAR ESPACIO DE TRABAJO Y SEPARAR BOTONES
 st.markdown("""
     <style>
-    [data-testid="stSidebar"] { background-color: #111418; min-width: 350px !important; }
-    .sidebar-title { color: white; font-size: 22px; font-weight: bold; text-transform: uppercase; }
-    .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; }
-    .stButton > button { width: 100%; background-color: #d4ff00 !important; color: black !important; font-weight: bold !important; }
-    .btn-png > div > button { background-color: #24a148 !important; color: white !important; }
+    .main { overflow: hidden; }
+    .block-container { padding: 0rem !important; max-width: 100% !important; }
+    [data-testid="stSidebar"] { background-color: #111418; min-width: 380px !important; }
+    .sidebar-title { color: white; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
+    .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; display: block; }
+    
+    /* Separación de botones */
+    .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; height: 3.5em; margin-bottom: 10px; }
+    div.stButton > button:first-child { background-color: #d4ff00 !important; color: black !important; }
+    .btn-png > div > button { background-color: #24a148 !important; color: white !important; margin-top: 20px; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; }
+    
     header, footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR ---
+# Definición de tamaños estándar (Ancho, Alto en cm)
+PRESETS = {
+    "Personalizado": None,
+    "A2 (42 x 59.4 cm)": (42.0, 59.4),
+    "A3 (29.7 x 42 cm)": (29.7, 42.0),
+    "A4 (21 x 29.7 cm)": (21.0, 29.7)
+}
+
 with st.sidebar:
     st.markdown('<div class="sidebar-title">CORRECTOR STRATEGIA</div>', unsafe_allow_html=True)
     archivo = st.file_uploader("Subir Imagen", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
     
-    img_final_objeto = None # Variable local para evitar el AttributeError
-
     if archivo:
         img_input = Image.open(archivo).convert("RGBA")
         ancho_orig, alto_orig = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
+
+        st.markdown('<span class="step-label">1. Tamaño y Resolución (Real-Time)</span>', unsafe_allow_html=True)
+        preset = st.selectbox("Ajustar a tamaño:", list(PRESETS.keys()))
+        unidad = st.selectbox("Unidad de medida", ["Centímetros", "Píxeles"])
+        dpi_target = st.number_input("Resolución (DPI)", value=300)
         
-        st.markdown('<span class="step-label">Tamaño de Imagen</span>', unsafe_allow_html=True)
-        unidad = st.selectbox("Unidad", ["Píxeles", "Centímetros"], index=1)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if unidad == "Centímetros":
-                val_ancho = st.number_input("Anchura", value=float(ancho_orig * 2.54 / dpi_orig))
-            else:
-                val_ancho = st.number_input("Anchura", value=int(ancho_orig))
-        with col2:
-            mantener = st.checkbox("🔗", value=True)
-            
-        if unidad == "Centímetros":
-            val_alto = st.number_input("Altura", value=float(alto_orig * 2.54 / dpi_orig) if mantener else 0.0)
-            dpi_target = st.number_input("Resolución (DPI)", value=300)
-            new_w, new_h = int((val_ancho / 2.54) * dpi_target), int((val_alto / 2.54) * dpi_target)
+        # Lógica de Proporción y Medidas
+        if preset != "Personalizado":
+            w_cm, h_cm = PRESETS[preset]
         else:
-            val_alto = st.number_input("Altura", value=int(alto_orig))
-            dpi_target = st.number_input("DPI", value=int(dpi_orig))
-            new_w, new_h = int(val_ancho), int(val_alto)
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if unidad == "Centímetros":
+                    w_cm = st.number_input("Ancho (cm)", value=float(ancho_orig * 2.54 / dpi_orig))
+                else:
+                    new_px_w = st.number_input("Ancho (px)", value=int(ancho_orig))
+                    w_cm = (new_px_w * 2.54) / dpi_target
+            with col2:
+                mantener = st.checkbox("🔗", value=True)
+            
+            if unidad == "Centímetros":
+                h_cm = st.number_input("Alto (cm)", value=float(alto_orig * 2.54 / dpi_orig) if mantener else 0.0)
+            else:
+                new_px_h = st.number_input("Alto (px)", value=int(alto_orig) if mantener else 0)
+                h_cm = (new_px_h * 2.54) / dpi_target
 
-        umbral = st.slider("Umbral Alpha", 1, 254, 128)
-        opcion_fondo = st.selectbox("Fondo Visor", ["Negro", "Blanco", "Transparente"])
-        bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[opcion_fondo]
+        # Conversión final a píxeles para el motor
+        final_w = int((w_cm / 2.54) * dpi_target)
+        final_h = int((h_cm / 2.54) * dpi_target)
 
-        if st.button("CORREGIR Y REDIMENSIONAR"):
-            # Procesamiento
-            img_resampled = img_input.resize((new_w, new_h), resample=Image.LANCZOS)
-            datos = np.array(img_resampled)
+        # REDIMENSIONADO AUTOMÁTICO (Sin botón)
+        img_resized = img_input.resize((final_w, final_h), resample=Image.LANCZOS)
+        
+        st.markdown('<span class="step-label">2. Limpieza de Semitransparencias</span>', unsafe_allow_html=True)
+        umbral = st.slider("Umbral de corte (Alpha)", 1, 254, 128)
+        
+        if st.button("APLICAR CORRECCIÓN DE BORDES"):
+            datos = np.array(img_resized)
             nuevo_a = np.where(datos[:,:,3] < umbral, 0, 255).astype(np.uint8)
-            img_final_objeto = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
-            st.session_state['temp_img'] = img_final_objeto # Guardado seguro
-            st.success("✅ ¡Procesado!")
+            st.session_state['img_final'] = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
+            st.session_state['dpi_final'] = dpi_target
 
-        if 'temp_img' in st.session_state:
-            img_final_objeto = st.session_state['temp_img']
+        # BOTONES DE DESCARGA SEPARADOS
+        if 'img_final' in st.session_state:
+            st.markdown("---")
             nombre = archivo.name.rsplit('.', 1)[0].upper()
             
-            # Botón PNG
-            buf_png = io.BytesIO()
-            img_final_objeto.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
             st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-            st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+            buf_png = io.BytesIO()
+            st.session_state['img_final'].save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
+            st.download_button("📥 DESCARGAR PNG CORREGIDO", buf_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # Botón PDF
             if pdf_disponible:
+                st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
                 buf_pdf = io.BytesIO()
-                w_pts, h_pts = (img_final_objeto.size[0] * 72 / dpi_target), (img_final_objeto.size[1] * 72 / dpi_target)
+                w_pts, h_pts = (st.session_state['img_final'].size[0] * 72 / dpi_target), (st.session_state['img_final'].size[1] * 72 / dpi_target)
                 p = pdf_canvas.Canvas(buf_pdf, pagesize=(w_pts, h_pts))
                 tmp = io.BytesIO()
-                img_final_objeto.save(tmp, format="PNG")
+                st.session_state['img_final'].save(tmp, format="PNG")
                 p.drawImage(ImageReader(tmp), 0, 0, width=w_pts, height=h_pts, mask='auto')
                 p.save()
-                st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
-                st.download_button("📄 DESCARGAR PDF", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
+                st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR ---
+        st.markdown('<span class="step-label">Visualización</span>', unsafe_allow_html=True)
+        opcion_fondo = st.selectbox("Fondo Visor", ["Negro", "Blanco", "Transparente"], index=0)
+        bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[opcion_fondo]
+
+# --- VISOR FULL SCREEN (RESTAURADO) ---
 if archivo:
-    if 'temp_img' in st.session_state:
-        img_visor = st.session_state['temp_img']
+    # Si ya corregimos, mostrar la corregida. Si no, mostrar la redimensionada con Ghost Pixels.
+    if 'img_final' in st.session_state:
+        img_visor = st.session_state['img_final']
     else:
-        # Previsualización Ghost Pixels
-        vis = np.array(img_input)
+        vis = np.array(img_resized)
         vis[(vis[:,:,3] > 0) & (vis[:,:,3] < 255)] = [255, 0, 255, 255]
         img_visor = Image.fromarray(vis)
 
@@ -124,7 +145,7 @@ if archivo:
         let scale = 1, vX = 0, vY = 0, pX, pY, down = false;
         img.onload = () => {{
             canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-            scale = Math.min(canvas.width/img.width, canvas.height/img.height) * 0.8;
+            scale = Math.min(canvas.width/img.width, canvas.height/img.height) * 0.9;
             vX = (canvas.width - img.width*scale)/2; vY = (canvas.height - img.height*scale)/2;
             draw();
         }};
@@ -133,9 +154,10 @@ if archivo:
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(img, vX, vY, img.width*scale, img.height*scale);
         }}
-        canvas.onwheel = (e) => {{ e.preventDefault(); scale *= e.deltaY > 0 ? 0.9 : 1.1; draw(); }};
+        canvas.onwheel = (e) => {{ e.preventDefault(); scale *= e.deltaY > 0 ? 0.85 : 1.15; draw(); }};
         canvas.onmousedown = (e) => {{ down = true; pX = e.offsetX - vX; pY = e.offsetY - vY; }};
         window.onmouseup = () => down = false;
         canvas.onmousemove = (e) => {{ if(down) {{ vX = e.offsetX - pX; vY = e.offsetY - pY; draw(); }} }};
+        window.onresize = () => {{ canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); }};
     </script>
     """, height=1200)
