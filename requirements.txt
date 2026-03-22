@@ -1,4 +1,6 @@
 streamlit
 Pillow
 numpy
-streamlit-drawable-canvas
+python-dotenv
+folium
+streamlit-folium
