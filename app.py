@@ -4,7 +4,7 @@ from PIL import Image
 import io
 import base64
 
-# Configuración de ReportLab
+# Configuración de ReportLab para el PDF DTF
 try:
     from reportlab.pdfgen import canvas as pdf_canvas
     from reportlab.lib.utils import ImageReader
@@ -15,7 +15,7 @@ except ImportError:
 # CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: ESTILOS
+# CSS: ESTILOS FIJOS
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -24,9 +24,8 @@ st.markdown("""
     .sidebar-title { color: white; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
     .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; display: block; }
     
-    .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; height: 3em; margin-top: 10px; }
-    .btn-png > div > button { background-color: #24a148 !important; color: white !important; }
-    .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; }
+    .btn-png > div > button { background-color: #24a148 !important; color: white !important; font-weight: bold !important; height: 3em; margin-top: 10px; }
+    .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; font-weight: bold !important; height: 3em; margin-top: 10px; }
     
     .status-box { padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; border: 1px solid; }
     .status-clean { background-color: rgba(36, 161, 72, 0.1); border-color: #24a148; color: #24a148; }
@@ -50,7 +49,7 @@ with st.sidebar:
     if archivo:
         img_input = Image.open(archivo).convert("RGBA")
         
-        # 1. ANALIZADOR (ARRIBA DE TODO)
+        # 1. ANALIZADOR DE SEMITRANSPARENCIAS
         pixeles_orig = np.array(img_input)
         alpha_orig = pixeles_orig[:, :, 3]
         if np.any((alpha_orig > 0) & (alpha_orig < 255)):
@@ -58,7 +57,7 @@ with st.sidebar:
         else:
             st.markdown('<div class="status-box status-clean">✅ LIMPIO (SIN SEMITRANSPARENCIAS)</div>', unsafe_allow_html=True)
 
-        # 2. SECCIÓN VISOR (ESTADO ANTERIOR)
+        # 2. CONFIGURACIÓN DEL VISOR (ARRIBA)
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
         fnd = st.selectbox("Fondo del área de trabajo", ["Negro", "Blanco", "Transparente"])
         bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[fnd]
@@ -94,69 +93,93 @@ with st.sidebar:
         f_w, f_h = int((w_cm / 2.54) * dpi_target), int((h_cm / 2.54) * dpi_target)
         img_resized = img_input.resize((f_w, f_h), resample=Image.LANCZOS)
         
-        # 4. LIMPIEZA AUTOMÁTICA (SIN BOTÓN)
+        # 4. CORRECCIÓN AUTOMÁTICA EN TIEMPO REAL
         st.markdown('<span class="step-label">2. Corrección de Bordes</span>', unsafe_allow_html=True)
         umbral = st.slider("Umbral de corte", 1, 254, 128)
         
-        # PROCESADO EN TIEMPO REAL
-        datos = np.array(img_resized)
-        nuevo_a = np.where(datos[:,:,3] < umbral, 0, 255).astype(np.uint8)
-        img_final = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
+        # Procesado instantáneo para el visor y descarga
+        datos_np = np.array(img_resized)
+        nuevo_alpha = np.where(datos_np[:,:,3] < umbral, 0, 255).astype(np.uint8)
+        img_final = Image.fromarray(np.stack([datos_np[:,:,0], datos_np[:,:,1], datos_np[:,:,2], nuevo_alpha], axis=-1))
 
-        # 5. DESCARGAS
+        # 5. BOTONES DE DESCARGA
         st.markdown("---")
-        nombre = archivo.name.rsplit('.', 1)[0].upper()
+        nombre_base = archivo.name.rsplit('.', 1)[0].upper()
         
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-        b_png = io.BytesIO()
-        img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
-        st.download_button("📥 DESCARGAR PNG", b_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+        buf_png = io.BytesIO()
+        img_final.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
+        st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre_base}.PNG", "image/png")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if pdf_disponible:
             st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
-            b_pdf = io.BytesIO()
-            pts_w, pts_h = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
-            c = pdf_canvas.Canvas(b_pdf, pagesize=(pts_w, pts_h))
-            t = io.BytesIO(); img_final.save(t, format="PNG")
-            c.drawImage(ImageReader(t), 0, 0, width=pts_w, height=pts_h, mask='auto'); c.save()
-            st.download_button("📄 DESCARGAR PDF", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
+            buf_pdf = io.BytesIO()
+            p_w, p_h = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
+            canvas_pdf = pdf_canvas.Canvas(buf_pdf, pagesize=(p_w, p_h))
+            img_tmp = io.BytesIO(); img_final.save(img_tmp, format="PNG")
+            canvas_pdf.drawImage(ImageReader(img_tmp), 0, 0, width=p_w, height=p_h, mask='auto')
+            canvas_pdf.save()
+            st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre_base}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR CON ZOOM FOCALIZADO Y ACTUALIZACIÓN DINÁMICA ---
+# --- VISOR ESTABLE (CORREGIDO) ---
 if archivo:
-    buf = io.BytesIO()
-    img_final.save(buf, format="PNG")
-    img_64 = base64.b64encode(buf.getvalue()).decode()
+    # Generar string de imagen para el JS
+    visor_buf = io.BytesIO()
+    img_final.save(visor_buf, format="PNG")
+    img_b64 = base64.b64encode(visor_buf.getvalue()).decode()
     
     st.components.v1.html(f"""
-    <div style="background-color: {bg_css}; width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative;">
-        <canvas id="c" style="cursor: move;"></canvas>
-        <button onclick="rv()" style="position:fixed; bottom:20px; right:20px; padding:12px; background:#d4ff00; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">RE-CENTRAR IMAGEN</button>
+    <div style="background-color: {bg_css}; width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; background-image: radial-gradient(#333 1px, transparent 1px); background-size: 20px 20px;">
+        <canvas id="canvas" style="cursor: move;"></canvas>
+        <button onclick="recenter()" style="position:fixed; bottom:20px; right:20px; padding:12px 20px; background:#d4ff00; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-family: sans-serif;">RE-CENTRAR IMAGEN</button>
     </div>
     <script>
-        const c = document.getElementById('c'), x = c.getContext('2d'), i = new Image();
-        i.src = "data:image/png;base64,{img_64}";
-        let s = 1, vX = 0, vY = 0, d = false, pX, pY;
-        function rv() {{
-            s = Math.min(window.innerWidth/i.width, window.innerHeight/i.height) * 0.8;
-            vX = (window.innerWidth - i.width*s)/2; vY = (window.innerHeight - i.height*s)/2;
-            w();
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.src = "data:image/png;base64,{img_b64}";
+        
+        let scale = 1, viewX = 0, viewY = 0, isDragging = false, lastX, lastY;
+
+        function recenter() {{
+            scale = Math.min(window.innerWidth / img.width, window.innerHeight / img.height) * 0.8;
+            viewX = (window.innerWidth - img.width * scale) / 2;
+            viewY = (window.innerHeight - img.height * scale) / 2;
+            render();
         }}
-        i.onload = () => {{ c.width = window.innerWidth; c.height = window.innerHeight; rv(); }};
-        function w() {{
-            x.clearRect(0, 0, c.width, c.height);
-            x.imageSmoothingEnabled = false;
-            x.drawImage(i, vX, vY, i.width*s, i.height*s);
-        }}
-        c.onwheel = (e) => {{
-            e.preventDefault(); const z = e.deltaY > 0 ? 0.9 : 1.1;
-            vX = e.offsetX - (e.offsetX - vX) * z; vY = e.offsetY - (e.offsetY - vY) * z;
-            s *= z; w();
+
+        img.onload = () => {{
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            recenter();
         }};
-        c.onmousedown = (e) => {{ d = true; pX = e.offsetX - vX; pY = e.offsetY - vY; }};
-        window.onmouseup = () => d = false;
-        c.onmousemove = (e) => {{ if(d) {{ vX = e.offsetX - pX; vY = e.offsetY - pY; w(); }} }};
-        window.onresize = () => {{ c.width = window.innerWidth; c.height = window.innerHeight; w(); }};
+
+        function render() {{
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(img, viewX, viewY, img.width * scale, img.height * scale);
+        }}
+
+        canvas.onwheel = (e) => {{
+            e.preventDefault();
+            const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+            viewX = e.offsetX - (e.offsetX - viewX) * zoom;
+            viewY = e.offsetY - (e.offsetY - viewY) * zoom;
+            scale *= zoom;
+            render();
+        }};
+
+        canvas.onmousedown = (e) => {{ isDragging = true; lastX = e.offsetX - viewX; lastY = e.offsetY - viewY; }};
+        window.onmouseup = () => isDragging = false;
+        canvas.onmousemove = (e) => {{
+            if (isDragging) {{
+                viewX = e.offsetX - lastX;
+                viewY = e.offsetY - lastY;
+                render();
+            }}
+        }};
+        window.onresize = () => {{ canvas.width = window.innerWidth; canvas.height = window.innerHeight; render(); }};
     </script>
     """, height=1000)
