@@ -2,4 +2,3 @@ streamlit
 Pillow
 numpy
 reportlab
-pdf2image
