@@ -13,7 +13,7 @@ except ImportError:
     pdf_disponible = False
 
 # CONFIGURACIÓN DE PÁGINA - Layout Wide es clave
-st.set_page_config(page_title="CORRECTOR NOVAGE v4.0", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="CORRECTOR SEMITRANSPARENCIAS", layout="wide", initial_sidebar_state="expanded")
 
 # CSS: ESTO ELIMINA EL RECUADRO LIMITADO
 st.markdown("""
