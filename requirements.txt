@@ -2,3 +2,5 @@ streamlit
 Pillow
 numpy
 reportlab
+pdf2image
+opencv-python-headless
