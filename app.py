@@ -12,10 +12,10 @@ try:
 except ImportError:
     pdf_disponible = False
 
-# CONFIGURACIÓN DE PÁGINA (Layout Wide para recuperar espacio)
+# CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: RECUPERAR ESPACIO DE TRABAJO Y SEPARAR BOTONES
+# CSS: INTERFAZ Y BOTONES
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -23,18 +23,24 @@ st.markdown("""
     [data-testid="stSidebar"] { background-color: #111418; min-width: 380px !important; }
     .sidebar-title { color: white; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
     .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; display: block; }
-    
-    /* Separación de botones */
     .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; height: 3.5em; margin-bottom: 10px; }
     div.stButton > button:first-child { background-color: #d4ff00 !important; color: black !important; }
-    .btn-png > div > button { background-color: #24a148 !important; color: white !important; margin-top: 20px; }
+    .btn-png > div > button { background-color: #24a148 !important; color: white !important; margin-top: 10px; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; }
-    
     header, footer { visibility: hidden; }
+    
+    /* Contenedor del visor con scrollbars */
+    .viewer-container {
+        width: 100%;
+        height: 100vh;
+        overflow: auto !important; /* Habilita barras de scroll */
+        background-image: radial-gradient(#333 1px, transparent 1px);
+        background-size: 20px 20px;
+        position: relative;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# Definición de tamaños estándar (Ancho, Alto en cm)
 PRESETS = {
     "Personalizado": None,
     "A2 (42 x 59.4 cm)": (42.0, 59.4),
@@ -51,12 +57,11 @@ with st.sidebar:
         ancho_orig, alto_orig = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
 
-        st.markdown('<span class="step-label">1. Tamaño y Resolución (Real-Time)</span>', unsafe_allow_html=True)
+        st.markdown('<span class="step-label">1. Tamaño y Resolución</span>', unsafe_allow_html=True)
         preset = st.selectbox("Ajustar a tamaño:", list(PRESETS.keys()))
         unidad = st.selectbox("Unidad de medida", ["Centímetros", "Píxeles"])
         dpi_target = st.number_input("Resolución (DPI)", value=300)
         
-        # Lógica de Proporción y Medidas
         if preset != "Personalizado":
             w_cm, h_cm = PRESETS[preset]
         else:
@@ -76,31 +81,25 @@ with st.sidebar:
                 new_px_h = st.number_input("Alto (px)", value=int(alto_orig) if mantener else 0)
                 h_cm = (new_px_h * 2.54) / dpi_target
 
-        # Conversión final a píxeles para el motor
         final_w = int((w_cm / 2.54) * dpi_target)
         final_h = int((h_cm / 2.54) * dpi_target)
-
-        # REDIMENSIONADO AUTOMÁTICO (Sin botón)
         img_resized = img_input.resize((final_w, final_h), resample=Image.LANCZOS)
         
-        st.markdown('<span class="step-label">2. Limpieza de Semitransparencias</span>', unsafe_allow_html=True)
-        umbral = st.slider("Umbral de corte (Alpha)", 1, 254, 128)
+        st.markdown('<span class="step-label">2. Limpieza (Alpha)</span>', unsafe_allow_html=True)
+        umbral = st.slider("Umbral de corte", 1, 254, 128)
         
-        if st.button("APLICAR CORRECCIÓN DE BORDES"):
+        if st.button("APLICAR CORRECCIÓN"):
             datos = np.array(img_resized)
             nuevo_a = np.where(datos[:,:,3] < umbral, 0, 255).astype(np.uint8)
             st.session_state['img_final'] = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
-            st.session_state['dpi_final'] = dpi_target
 
-        # BOTONES DE DESCARGA SEPARADOS
         if 'img_final' in st.session_state:
             st.markdown("---")
             nombre = archivo.name.rsplit('.', 1)[0].upper()
-            
             st.markdown('<div class="btn-png">', unsafe_allow_html=True)
             buf_png = io.BytesIO()
             st.session_state['img_final'].save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
-            st.download_button("📥 DESCARGAR PNG CORREGIDO", buf_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+            st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
             st.markdown('</div>', unsafe_allow_html=True)
             
             if pdf_disponible:
@@ -112,30 +111,29 @@ with st.sidebar:
                 st.session_state['img_final'].save(tmp, format="PNG")
                 p.drawImage(ImageReader(tmp), 0, 0, width=w_pts, height=h_pts, mask='auto')
                 p.save()
-                st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
+                st.download_button("📄 DESCARGAR PDF", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
                 st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<span class="step-label">Visualización</span>', unsafe_allow_html=True)
         opcion_fondo = st.selectbox("Fondo Visor", ["Negro", "Blanco", "Transparente"], index=0)
         bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[opcion_fondo]
 
-# --- VISOR FULL SCREEN (RESTAURADO) ---
+# --- VISOR CON SCROLLBARS Y AUTO-CENTRADO ---
 if archivo:
-    # Si ya corregimos, mostrar la corregida. Si no, mostrar la redimensionada con Ghost Pixels.
-    if 'img_final' in st.session_state:
-        img_visor = st.session_state['img_final']
-    else:
-        vis = np.array(img_resized)
+    img_v = st.session_state['img_final'] if 'img_final' in st.session_state else img_resized
+    if 'img_final' not in st.session_state:
+        vis = np.array(img_v)
         vis[(vis[:,:,3] > 0) & (vis[:,:,3] < 255)] = [255, 0, 255, 255]
-        img_visor = Image.fromarray(vis)
+        img_v = Image.fromarray(vis)
 
     buffered = io.BytesIO()
-    img_visor.save(buffered, format="PNG")
+    img_v.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
     
     st.components.v1.html(f"""
-    <div style="background-color: {bg_css}; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background-image: radial-gradient(#333 1px, transparent 1px); background-size: 20px 20px;">
+    <div class="viewer-container" style="background-color: {bg_css};">
         <canvas id="canvas" style="cursor: move;"></canvas>
+        <button onclick="resetView()" style="position:fixed; bottom:20px; right:20px; z-index:100; padding:10px; background:#d4ff00; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">RE-CENTRAR IMAGEN</button>
     </div>
     <script>
         const canvas = document.getElementById('canvas');
@@ -143,21 +141,34 @@ if archivo:
         const img = new Image();
         img.src = "data:image/png;base64,{img_str}";
         let scale = 1, vX = 0, vY = 0, pX, pY, down = false;
-        img.onload = () => {{
-            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-            scale = Math.min(canvas.width/img.width, canvas.height/img.height) * 0.9;
-            vX = (canvas.width - img.width*scale)/2; vY = (canvas.height - img.height*scale)/2;
+
+        function resetView() {{
+            scale = Math.min(window.innerWidth/img.width, window.innerHeight/img.height) * 0.8;
+            vX = (window.innerWidth - img.width*scale)/2; 
+            vY = (window.innerHeight - img.height*scale)/2;
             draw();
+        }}
+
+        img.onload = () => {{
+            canvas.width = Math.max(window.innerWidth, img.width * 2); 
+            canvas.height = Math.max(window.innerHeight, img.height * 2);
+            resetView();
         }};
+
         function draw() {{
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(img, vX, vY, img.width*scale, img.height*scale);
         }}
-        canvas.onwheel = (e) => {{ e.preventDefault(); scale *= e.deltaY > 0 ? 0.85 : 1.15; draw(); }};
+
+        canvas.onwheel = (e) => {{ 
+            e.preventDefault(); 
+            const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+            scale *= zoom;
+            draw();
+        }};
         canvas.onmousedown = (e) => {{ down = true; pX = e.offsetX - vX; pY = e.offsetY - vY; }};
         window.onmouseup = () => down = false;
         canvas.onmousemove = (e) => {{ if(down) {{ vX = e.offsetX - pX; vY = e.offsetY - pY; draw(); }} }};
-        window.onresize = () => {{ canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); }};
     </script>
     """, height=1200)
