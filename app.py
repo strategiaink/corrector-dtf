@@ -4,37 +4,42 @@ from PIL import Image
 import io
 import base64
 
+# Configuración de página - Forzamos el uso de todo el ancho
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide")
 
-# CSS para branding y eliminar el suavizado del contenedor
+# CSS para maximizar el área de trabajo
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; color: white; }
+    .main { background-color: #0e1117; color: white; padding-top: 0rem; }
     [data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; min-width: 350px !important; }
+    
+    /* Botones Strategia Ink */
     .stButton > button, .stDownloadButton > button { 
         width: 100%; background-color: #d4ff00 !important; color: black !important; 
         font-weight: bold !important; border-radius: 8px !important; border: none !important; height: 3em;
     }
-    .status-box {
-        padding: 12px; border-radius: 10px; font-weight: bold; margin-bottom: 15px; border: 1px solid;
-        display: flex; align-items: center; justify-content: center; text-align: center;
-    }
-    .status-warning { background-color: #1f1906; color: #ffd33d; border-color: #ffd33d; }
-    .status-success { background-color: #061f10; color: #3df18d; border-color: #3df18d; }
-    
-    /* Fondo ajedrezado para el visor */
+
+    /* Contenedor Full Screen para el Visor */
     #visor-externo {
-        width: 100%; height: 750px; border: 1px solid #30363d; border-radius: 10px;
+        width: 100%; 
+        height: 85vh; /* Ocupa casi todo el alto de la pantalla */
+        border: 1px solid #30363d; 
+        border-radius: 10px;
         background-color: #1a1a1a;
         background-image: linear-gradient(45deg, #2b2b2b 25%, transparent 25%), linear-gradient(-45deg, #2b2b2b 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2b2b2b 75%), linear-gradient(-45deg, transparent 75%, #2b2b2b 75%);
         background-size: 20px 20px;
+        overflow: hidden;
     }
+    
+    /* Eliminar espacios innecesarios de Streamlit */
+    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
     </style>
     """, unsafe_allow_html=True)
 
 if 'procesado' not in st.session_state:
     st.session_state.procesado = False
 
+# BARRA LATERAL
 st.sidebar.title("CORRECTOR STRATEGIA INK")
 st.sidebar.markdown("---")
 
@@ -47,11 +52,11 @@ if archivo:
     
     hay_semi = np.any((a > 0) & (a < 255))
     if hay_semi:
-        st.sidebar.markdown('<div class="status-box status-warning">⚠️ ATENCIÓN: Esta imagen tiene semitransparencias (Ghost Pixels).</div>', unsafe_allow_html=True)
+        st.sidebar.markdown('<div class="status-box" style="background-color: #1f1906; color: #ffd33d; padding:10px; border-radius:10px; border: 1px solid #ffd33d; text-align:center;">⚠️ ATENCIÓN: Ghost Pixels detectados.</div>', unsafe_allow_html=True)
     else:
-        st.sidebar.markdown('<div class="status-box status-success">✅ IMAGEN LIMPIA: Sin halos ni semitransparencias.</div>', unsafe_allow_html=True)
+        st.sidebar.markdown('<div class="status-box" style="background-color: #061f10; color: #3df18d; padding:10px; border-radius:10px; border: 1px solid #3df18d; text-align:center;">✅ IMAGEN LIMPIA.</div>', unsafe_allow_html=True)
 
-    st.sidebar.markdown("### Configuración de Salida")
+    st.sidebar.markdown("### Configuración")
     dpi_val = st.sidebar.number_input("Resolución (DPI)", value=300)
     umbral = st.sidebar.slider("Umbral de Corte Alpha", 1, 254, 128)
     
@@ -77,9 +82,8 @@ if archivo:
             st.session_state.procesado = False
             st.rerun()
 
-    # VISOR MOTOR CANVAS (FUERZA PÍXEL REAL)
-    st.subheader("Control de Calidad (Píxel Crudo)")
-    st.caption("Ruedita: Zoom | Click Izquierdo: Mover")
+    # VISOR GIGANTE (MÁXIMA PRECISIÓN)
+    st.subheader(f"Visor de Precisión: {archivo.name}")
     
     buffered = io.BytesIO()
     img_visor.save(buffered, format="PNG")
@@ -97,20 +101,25 @@ if archivo:
 
         let scale = 1, viewX = 0, viewY = 0, isPanning = false, startX, startY;
 
-        img.onload = () => {{
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
+        function resizeCanvas() {{
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
             draw();
+        }}
+
+        img.onload = () => {{
+            // Centrar imagen al cargar
+            scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.9;
+            viewX = (canvas.width - img.width * scale) / 2;
+            viewY = (canvas.height - img.height * scale) / 2;
+            resizeCanvas();
         }};
+
+        window.addEventListener('resize', resizeCanvas);
 
         function draw() {{
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            // ESTO ELIMINA EL SUAVIZADO EN EL CANVAS
-            ctx.imageSmoothingEnabled = false;
-            ctx.mozImageSmoothingEnabled = false;
-            ctx.webkitImageSmoothingEnabled = false;
-            ctx.msImageSmoothingEnabled = false;
-
+            ctx.imageSmoothingEnabled = false; // FUERZA EL PÍXEL CRUDO
             ctx.save();
             ctx.translate(viewX, viewY);
             ctx.scale(scale, scale);
@@ -125,7 +134,6 @@ if archivo:
             viewX = mouseX - (mouseX - viewX) * zoom;
             viewY = mouseY - (mouseY - viewY) * zoom;
             scale *= zoom;
-            if (scale < 0.1) scale = 0.1; if (scale > 100) scale = 100;
             draw();
         }};
 
@@ -137,10 +145,12 @@ if archivo:
             viewY = e.offsetY - startY;
             draw();
         }};
+        
+        resizeCanvas();
     </script>
     """
-    st.components.v1.html(html_visor, height=770)
+    st.components.v1.html(html_visor, height=800) # El alto del iframe ahora es grande
 
 else:
     st.session_state.procesado = False
-    st.info("Sube un archivo PNG para iniciar el análisis.")
+    st.info("Sube un archivo PNG para analizar los bordes en tamaño completo.")
