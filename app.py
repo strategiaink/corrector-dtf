@@ -4,7 +4,7 @@ from PIL import Image
 import io
 import base64
 
-# Intentar importar reportlab, si falla avisar al usuario
+# Intentar importar reportlab para el PDF
 try:
     from reportlab.pdfgen import canvas as pdf_canvas
     from reportlab.lib.pagesizes import A4
@@ -15,7 +15,7 @@ except ImportError:
 # CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR NOVAGE v4.0", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: DISEÑO FIEL A LA WEB
+# CSS: DISEÑO FIEL A LA WEB Y CARTELES
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -26,17 +26,21 @@ st.markdown("""
     .sidebar-subtitle { color: #8b949e; font-size: 14px; margin-bottom: 20px; font-style: italic; }
     .step-label { color: white; font-weight: bold; margin-top: 15px; margin-bottom: 8px; display: block; border-left: 3px solid #d4ff00; padding-left: 10px; }
     
+    /* Carteles de Estado */
     .warning-box {
         background-color: #2b2106; color: #e3b341; padding: 12px;
         border-radius: 8px; border: 1px solid #e3b341; font-weight: bold;
         text-align: center; margin: 15px 0;
     }
+    .success-box {
+        background-color: #061f10; color: #3df18d; padding: 12px;
+        border-radius: 8px; border: 1px solid #3df18d; font-weight: bold;
+        text-align: center; margin: 15px 0;
+    }
 
     .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; text-transform: uppercase; height: 3.5em; transition: 0.3s; }
     div.stButton > button:first-child { background-color: #d4ff00 !important; color: black !important; border: none !important; }
-    div.stButton > button:hover { transform: scale(1.02); }
     
-    /* Botones de Descarga Novage */
     .btn-descarga-png > div > button { background-color: #24a148 !important; color: white !important; }
     .btn-descarga-pdf > div > button { background-color: #d93025 !important; color: white !important; }
     
@@ -60,9 +64,12 @@ with st.sidebar:
         datos = np.array(img_orig)
         r, g, b, a = datos[:,:,0], datos[:,:,1], datos[:,:,2], datos[:,:,3]
         
+        # Lógica de detección y carteles
         hay_semi = np.any((a > 0) & (a < 255))
         if hay_semi:
             st.markdown('<div class="warning-box">⚠️ Tiene semitransparencias.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="success-box">✅ IMAGEN LIMPIA: No tiene semitransparencias ni halos.</div>', unsafe_allow_html=True)
         
         st.markdown('<span class="step-label">Fondo del Visor:</span>', unsafe_allow_html=True)
         opcion_fondo = st.selectbox("Fondo", ["Transparente", "Blanco", "Negro"], label_visibility="collapsed")
@@ -79,7 +86,6 @@ with st.sidebar:
             st.session_state.procesado = True
         
         if st.session_state.procesado:
-            # CORRECCIÓN ALPHA BINARIO
             nuevo_a = np.where(a < umbral, 0, 255).astype(np.uint8)
             img_final = Image.fromarray(np.stack([r, g, b, nuevo_a], axis=-1))
             img_visor = img_final
@@ -91,14 +97,12 @@ with st.sidebar:
             st.markdown("---")
             nombre_base = archivo.name.rsplit('.', 1)[0].upper()
             
-            # DESCARGA PNG
             buf_png = io.BytesIO()
             img_final.save(buf_png, format="PNG", dpi=(dpi_val, dpi_val))
             st.markdown('<div class="btn-descarga-png">', unsafe_allow_html=True)
             st.download_button("📥 DESCARGAR PNG CORREGIDO", buf_png.getvalue(), f"P000 | {nombre_base}.PNG", "image/png")
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # DESCARGA PDF
             if pdf_disponible:
                 buf_pdf = io.BytesIO()
                 p = pdf_canvas.Canvas(buf_pdf, pagesize=A4)
@@ -111,7 +115,6 @@ with st.sidebar:
                 st.download_button("📄 DESCARGAR PDF (SIN FONDO)", buf_pdf.getvalue(), f"P000 | {nombre_base}.PDF", "application/pdf")
                 st.markdown('</div>', unsafe_allow_html=True)
         else:
-            # MODO PREVISUALIZACIÓN GHOST PIXELS (MAGENTA)
             vis = datos.copy()
             vis[(a > 0) & (a < 255)] = [255, 0, 255, 255]
             img_visor = Image.fromarray(vis)
@@ -156,5 +159,3 @@ if archivo:
         canvas.onmousemove = (e) => {{ if(down) {{ vX = e.offsetX - pX; vY = e.offsetY - pY; draw(); }} }};
     </script>
     """, height=900)
-else:
-    st.info("Esperando archivo para Corrección Novage.")
