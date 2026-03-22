@@ -15,7 +15,7 @@ except ImportError:
 # CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: INTERFAZ Y BOTONES
+# CSS: ESPACIO FULL Y BOTONES
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -29,15 +29,19 @@ st.markdown("""
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; }
     header, footer { visibility: hidden; }
     
-    /* Contenedor del visor con scrollbars */
     .viewer-container {
         width: 100%;
         height: 100vh;
-        overflow: auto !important; /* Habilita barras de scroll */
+        overflow: auto !important;
         background-image: radial-gradient(#333 1px, transparent 1px);
         background-size: 20px 20px;
         position: relative;
     }
+    
+    /* Estilos para los carteles de estado */
+    .status-box { padding: 15px; border-radius: 10px; font-weight: bold; margin: 10px 0; text-align: center; }
+    .status-clean { background-color: rgba(36, 161, 72, 0.2); border: 1px solid #24a148; color: #24a148; }
+    .status-dirty { background-color: rgba(255, 165, 0, 0.2); border: 1px solid orange; color: orange; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,6 +60,16 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         ancho_orig, alto_orig = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
+
+        # --- ANALIZADOR DE SEMITRANSPARENCIAS (RESTAURADO) ---
+        pixeles = np.array(img_input)
+        alpha = pixeles[:, :, 3]
+        tiene_semi = np.any((alpha > 0) & (alpha < 255))
+        
+        if tiene_semi:
+            st.markdown('<div class="status-box status-dirty">⚠️ Tiene semitransparencias.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="status-box status-clean">✅ Limpio (sin semitransparencias).</div>', unsafe_allow_html=True)
 
         st.markdown('<span class="step-label">1. Tamaño y Resolución</span>', unsafe_allow_html=True)
         preset = st.selectbox("Ajustar a tamaño:", list(PRESETS.keys()))
@@ -81,8 +95,8 @@ with st.sidebar:
                 new_px_h = st.number_input("Alto (px)", value=int(alto_orig) if mantener else 0)
                 h_cm = (new_px_h * 2.54) / dpi_target
 
-        final_w = int((w_cm / 2.54) * dpi_target)
-        final_h = int((h_cm / 2.54) * dpi_target)
+        # Redimensionado en tiempo real
+        final_w, final_h = int((w_cm / 2.54) * dpi_target), int((h_cm / 2.54) * dpi_target)
         img_resized = img_input.resize((final_w, final_h), resample=Image.LANCZOS)
         
         st.markdown('<span class="step-label">2. Limpieza (Alpha)</span>', unsafe_allow_html=True)
@@ -118,7 +132,7 @@ with st.sidebar:
         opcion_fondo = st.selectbox("Fondo Visor", ["Negro", "Blanco", "Transparente"], index=0)
         bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[opcion_fondo]
 
-# --- VISOR CON SCROLLBARS Y AUTO-CENTRADO ---
+# --- VISOR CON ZOOM FOCALIZADO EN CURSOR ---
 if archivo:
     img_v = st.session_state['img_final'] if 'img_final' in st.session_state else img_resized
     if 'img_final' not in st.session_state:
@@ -133,7 +147,7 @@ if archivo:
     st.components.v1.html(f"""
     <div class="viewer-container" style="background-color: {bg_css};">
         <canvas id="canvas" style="cursor: move;"></canvas>
-        <button onclick="resetView()" style="position:fixed; bottom:20px; right:20px; z-index:100; padding:10px; background:#d4ff00; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">RE-CENTRAR IMAGEN</button>
+        <button onclick="resetView()" style="position:fixed; bottom:20px; right:20px; z-index:100; padding:10px; background:#d4ff00; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">RE-CENTRAR</button>
     </div>
     <script>
         const canvas = document.getElementById('canvas');
@@ -150,8 +164,8 @@ if archivo:
         }}
 
         img.onload = () => {{
-            canvas.width = Math.max(window.innerWidth, img.width * 2); 
-            canvas.height = Math.max(window.innerHeight, img.height * 2);
+            canvas.width = Math.max(window.innerWidth, img.width * 5); 
+            canvas.height = Math.max(window.innerHeight, img.height * 5);
             resetView();
         }};
 
@@ -164,9 +178,14 @@ if archivo:
         canvas.onwheel = (e) => {{ 
             e.preventDefault(); 
             const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+            const mouseX = e.offsetX;
+            const mouseY = e.offsetY;
+            vX = mouseX - (mouseX - vX) * zoom;
+            vY = mouseY - (mouseY - vY) * zoom;
             scale *= zoom;
             draw();
         }};
+
         canvas.onmousedown = (e) => {{ down = true; pX = e.offsetX - vX; pY = e.offsetY - vY; }};
         window.onmouseup = () => down = false;
         canvas.onmousemove = (e) => {{ if(down) {{ vX = e.offsetX - pX; vY = e.offsetY - pY; draw(); }} }};
