@@ -3,9 +3,14 @@ import numpy as np
 from PIL import Image
 import io
 import base64
-from pdf2image import convert_from_bytes
 
-# Intentar importar reportlab para el PDF de salida
+# Intentar importar librerías críticas para PDF
+try:
+    from pdf2image import convert_from_bytes
+    pdf_tools_ready = True
+except ImportError:
+    pdf_tools_ready = False
+
 try:
     from reportlab.pdfgen import canvas as pdf_canvas
     from reportlab.lib.pagesizes import A4
@@ -41,26 +46,32 @@ if 'procesado' not in st.session_state: st.session_state.procesado = False
 # --- SIDEBAR ---
 with st.sidebar:
     st.markdown('<div class="sidebar-title">CORRECTOR SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-subtitle">Soporta PNG, JPG y PDF - Strategia Ink</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-subtitle">PNG, JPG, PDF - Strategia Ink</div>', unsafe_allow_html=True)
     
     st.markdown('<span class="step-label">Paso 1: Carga tu archivo</span>', unsafe_allow_html=True)
-    archivo = st.file_uploader("Subir archivo", type=["png", "jpg", "jpeg", "pdf"], label_visibility="collapsed")
+    archivo = st.file_uploader("Subir", type=["png", "jpg", "jpeg", "pdf"], label_visibility="collapsed")
     
     img_orig = None
     if archivo:
-        # Lógica de lectura según formato
-        if archivo.type == "application/pdf":
-            paginas = convert_from_bytes(archivo.read(), first_page=1, last_page=1)
-            if paginas:
-                img_orig = paginas[0].convert("RGBA")
-        else:
-            img_orig = Image.open(archivo).convert("RGBA")
+        try:
+            if archivo.type == "application/pdf":
+                if pdf_tools_ready:
+                    # Convertir primera página a imagen
+                    paginas = convert_from_bytes(archivo.read(), first_page=1, last_page=1)
+                    if paginas:
+                        img_orig = paginas[0].convert("RGBA")
+                else:
+                    st.error("Error: Dependencias de PDF no instaladas.")
+            else:
+                img_orig = Image.open(archivo).convert("RGBA")
+        except Exception as e:
+            st.error(f"Error al leer archivo: {e}")
 
     if img_orig:
         datos = np.array(img_orig)
         r, g, b, a = datos[:,:,0], datos[:,:,1], datos[:,:,2], datos[:,:,3]
         
-        # Detección de semitransparencias
+        # Detección
         hay_semi = np.any((a > 0) & (a < 255))
         if hay_semi:
             st.markdown('<div class="warning-box">⚠️ Semitransparencias detectadas.</div>', unsafe_allow_html=True)
@@ -71,15 +82,14 @@ with st.sidebar:
         opcion_fondo = st.selectbox("Fondo", ["Negro", "Blanco", "Transparente"], label_visibility="collapsed")
         bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[opcion_fondo]
 
-        st.markdown('<span class="step-label">Paso 2: Corrección</span>', unsafe_allow_html=True)
-        dpi_val = st.number_input("DPI de salida", value=300)
-        umbral = st.slider("Umbral de Sensibilidad", 1, 254, 128)
+        st.markdown('<span class="step-label">Paso 2: Configuración</span>', unsafe_allow_html=True)
+        dpi_val = st.number_input("DPI", value=300)
+        umbral = st.slider("Umbral Alpha", 1, 254, 128)
         
         if st.button("Aplicar Corrección"):
             st.session_state.procesado = True
         
         if st.session_state.procesado:
-            # Corrección Alpha Binario
             nuevo_a = np.where(a < umbral, 0, 255).astype(np.uint8)
             img_final = Image.fromarray(np.stack([r, g, b, nuevo_a], axis=-1))
             img_visor = img_final
@@ -91,34 +101,31 @@ with st.sidebar:
             st.markdown("---")
             nombre_limpio = archivo.name.rsplit('.', 1)[0].upper()
             
-            # Descarga PNG
+            # Bloque de descarga PNG
             buf_png = io.BytesIO()
             img_final.save(buf_png, format="PNG", dpi=(dpi_val, dpi_val))
             st.markdown('<div class="btn-descarga-png">', unsafe_allow_html=True)
             st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre_limpio}.PNG", "image/png")
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # Descarga PDF Corregido (Sin fondo negro)
+            # Bloque de descarga PDF (Corregido sin fondo negro)
             if pdf_disponible:
                 buf_pdf = io.BytesIO()
                 p = pdf_canvas.Canvas(buf_pdf, pagesize=A4)
                 w_a4, h_a4 = A4
-                
                 temp_png = io.BytesIO()
                 img_final.save(temp_png, format="PNG")
                 temp_png.seek(0)
-                
                 img_reader = ImageReader(temp_png)
                 iw, ih = img_final.size
                 sc = min(w_a4/iw, h_a4/ih) * 0.9
                 p.drawImage(img_reader, (w_a4-iw*sc)/2, (h_a4-ih*sc)/2, width=iw*sc, height=ih*sc, mask='auto')
                 p.save()
-                
                 st.markdown('<div class="btn-descarga-pdf">', unsafe_allow_html=True)
                 st.download_button("📄 DESCARGAR PDF", buf_pdf.getvalue(), f"P000 | {nombre_limpio}.PDF", "application/pdf")
                 st.markdown('</div>', unsafe_allow_html=True)
         else:
-            # Previsualización Ghost Pixels Magenta
+            # Previsualización
             vis = datos.copy()
             vis[(a > 0) & (a < 255)] = [255, 0, 255, 255]
             img_visor = Image.fromarray(vis)
@@ -130,31 +137,17 @@ if img_orig:
     img_str = base64.b64encode(buffered.getvalue()).decode()
     
     st.components.v1.html(f"""
-    <style>
-        body {{ margin: 0; background-color: {bg_css}; overflow: hidden; }}
-        .full {{ width: 100vw; height: 100vh; background-image: radial-gradient(#333 1px, transparent 1px); background-size: 20px 20px; display: flex; align-items: center; justify-content: center; }}
-    </style>
-    <div class="full"><canvas id="canvas" style="cursor: move;"></canvas></div>
+    <style>body {{ margin: 0; background-color: {bg_css}; overflow: hidden; }} .f {{ width: 100vw; height: 100vh; background-image: radial-gradient(#333 1px, transparent 1px); background-size: 20px 20px; display: flex; align-items: center; justify-content: center; }}</style>
+    <div class="f"><canvas id="c" style="cursor: move;"></canvas></div>
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const img = new Image();
+        const c = document.getElementById('c'); const ctx = c.getContext('2d'); const img = new Image();
         img.src = "data:image/png;base64,{img_str}";
-        let scale=1, vX=0, vY=0, pX, pY, down=false;
-        img.onload = () => {{
-            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-            scale = Math.min(canvas.width/img.width, canvas.height/img.height) * 0.8;
-            vX = (canvas.width - img.width*scale)/2; vY = (canvas.height - img.height*scale)/2;
-            draw();
-        }};
-        function draw() {{
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(img, vX, vY, img.width*scale, img.height*scale);
-        }}
-        canvas.onwheel = (e) => {{ e.preventDefault(); scale *= e.deltaY > 0 ? 0.9 : 1.1; draw(); }};
-        canvas.onmousedown = (e) => {{ down = true; pX = e.offsetX - vX; pY = e.offsetY - vY; }};
-        window.onmouseup = () => down = false;
-        canvas.onmousemove = (e) => {{ if(down) {{ vX = e.offsetX - pX; vY = e.offsetY - pY; draw(); }} }};
+        let s=1, vX=0, vY=0, pX, pY, d=false;
+        img.onload = () => {{ c.width=window.innerWidth; c.height=window.innerHeight; s=Math.min(c.width/img.width, c.height/img.height)*0.8; vX=(c.width-img.width*s)/2; vY=(c.height-img.height*s)/2; dr(); }};
+        function dr() {{ ctx.clearRect(0,0,c.width,c.height); ctx.imageSmoothingEnabled=false; ctx.drawImage(img,vX,vY,img.width*s,img.height*s); }}
+        c.onwheel = (e) => {{ e.preventDefault(); s *= e.deltaY > 0 ? 0.9 : 1.1; dr(); }};
+        c.onmousedown = (e) => {{ d=true; pX=e.offsetX-vX; pY=e.offsetY-vY; }};
+        window.onmouseup = () => d=false;
+        c.onmousemove = (e) => {{ if(d) {{ vX=e.offsetX-pX; vY=e.offsetY-pY; dr(); }} }};
     </script>
     """, height=1200)
