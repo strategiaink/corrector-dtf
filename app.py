@@ -7,43 +7,67 @@ import base64
 # CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS PARA ÁREA DE TRABAJO FIJA
+# CSS PARA COPIAR LA ESTRUCTURA DE LA WEB
 st.markdown("""
     <style>
-    /* Eliminar scroll lateral y márgenes de Streamlit */
+    /* Reset total de márgenes */
     .main { overflow: hidden; }
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 0rem !important;
         padding-bottom: 0rem !important;
-        max-width: 98% !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+        max-width: 100% !important;
     }
     
-    /* Botones Strategia Ink */
-    .stButton > button, .stDownloadButton > button { 
-        width: 100%; background-color: #d4ff00 !important; color: black !important; 
-        font-weight: bold !important; border-radius: 8px !important; border: none !important;
-        height: 3em; text-transform: uppercase;
+    /* Sidebar Estilo Novage */
+    [data-testid="stSidebar"] {
+        background-color: #111418;
+        min-width: 400px !important;
     }
 
-    /* EL CONTENEDOR MAESTRO: No se expande, es fijo */
+    /* Botones de Función */
+    .stButton > button, .stDownloadButton > button { 
+        width: 100%; border-radius: 6px !important; font-weight: bold !important;
+        height: 3em; text-transform: uppercase; margin-bottom: 5px;
+    }
+    
+    /* Botón Aplicar (Amarillo) */
+    div.stButton > button:first-child { background-color: #d4ff00 !important; color: black !important; }
+    
+    /* Botón Descarga (Verde) */
+    div.stDownloadButton > button { background-color: #24a148 !important; color: white !important; }
+    
+    /* Botones Secundarios */
+    [data-testid="stSidebar"] button { border: 1px solid #30363d !important; }
+
+    /* EL CONTENEDOR MAESTRO (Ajustado a medida Novage) */
     .mesa-trabajo {
         width: 100%;
-        height: 85vh; 
-        border: 2px solid #30363d;
-        border-radius: 12px;
-        background-color: #1a1a1a;
-        background-image: radial-gradient(#333 1px, transparent 1px);
+        height: 94vh; /* Casi todo el alto del monitor */
+        background-color: #0d1117;
+        background-image: 
+            linear-gradient(45deg, #161b22 25%, transparent 25%), 
+            linear-gradient(-45deg, #161b22 25%, transparent 25%), 
+            linear-gradient(45deg, transparent 75%, #161b22 75%), 
+            linear-gradient(-45deg, transparent 75%, #161b22 75%);
         background-size: 20px 20px;
-        position: relative;
-        overflow: hidden; /* Crucial: nada sale de acá */
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        overflow: hidden;
     }
+    
+    header, footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
 if 'procesado' not in st.session_state:
     st.session_state.procesado = False
+if 'mostrar_original' not in st.session_state:
+    st.session_state.mostrar_original = False
 
-# BARRA LATERAL
+# BARRA LATERAL (Panel de Control Unificado)
 st.sidebar.title("CORRECTOR STRATEGIA INK")
 st.sidebar.markdown("---")
 
@@ -54,52 +78,64 @@ if archivo:
     datos = np.array(img_orig)
     r, g, b, a = datos[:,:,0], datos[:,:,1], datos[:,:,2], datos[:,:,3]
     
-    # Mensajes de estado
+    # Estado de la imagen
     hay_semi = np.any((a > 0) & (a < 255))
     if hay_semi:
-        st.sidebar.markdown('<div style="background-color: #1f1906; color: #ffd33d; padding:10px; border-radius:10px; border: 1px solid #ffd33d; text-align:center; font-weight:bold; margin-bottom:10px;">⚠️ GHOST PIXELS DETECTADOS.</div>', unsafe_allow_html=True)
+        st.sidebar.warning("⚠️ GHOST PIXELS DETECTADOS")
     else:
-        st.sidebar.markdown('<div style="background-color: #061f10; color: #3df18d; padding:10px; border-radius:10px; border: 1px solid #3df18d; text-align:center; font-weight:bold; margin-bottom:10px;">✅ IMAGEN LIMPIA.</div>', unsafe_allow_html=True)
+        st.sidebar.success("✅ IMAGEN LIMPIA")
 
     st.sidebar.markdown("### CONFIGURACIÓN")
-    dpi_val = st.sidebar.number_input("RESOLUCIÓN (DPI)", value=300)
-    umbral = st.sidebar.slider("UMBRAL ALPHA", 1, 254, 128)
+    umbral = st.sidebar.slider("SENSIBILIDAD / UMBRAL", 1, 254, 128)
+    dpi_val = st.sidebar.number_input("DPI SALIDA", value=300)
     
-    if st.sidebar.button("EJECUTAR CORRECCIÓN v4.0"):
-        st.session_state.procesado = True
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("APLICAR"):
+            st.session_state.procesado = True
+    with col2:
+        if st.button("RESETEAR"):
+            st.session_state.procesado = False
+            st.session_state.mostrar_original = False
+            st.rerun()
 
-    if not st.session_state.procesado:
-        vis = datos.copy()
-        vis[(a > 0) & (a < 255)] = [255, 0, 255, 255]
-        img_visor = Image.fromarray(vis)
-    else:
+    # NUEVAS FUNCIONES DE LA WEB EN EL SIDEBAR
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### HERRAMIENTAS")
+    
+    if st.sidebar.button("COMPARAR (ANTES/DESPUÉS)"):
+        st.session_state.mostrar_original = not st.session_state.mostrar_original
+
+    if st.session_state.procesado:
         nuevo_a = np.where(a < umbral, 0, 255).astype(np.uint8)
         img_final = Image.fromarray(np.stack([r, g, b, nuevo_a], axis=-1))
-        img_visor = img_final
         
+        # Lógica de qué mostrar en el visor
+        img_visor = img_orig if st.session_state.mostrar_original else img_final
+        
+        # Botón de Descarga PNG
         nombre_base = archivo.name.rsplit('.', 1)[0].upper()
         nombre_descarga = f"P000 | {nombre_base}.PNG"
         buf = io.BytesIO()
         img_final.save(buf, format="PNG", dpi=(dpi_val, dpi_val))
-        st.sidebar.download_button(f"📥 DESCARGAR: {nombre_descarga}", buf.getvalue(), nombre_descarga, "image/png")
-        
-        if st.sidebar.button("🔄 CORREGIR OTRA VEZ"):
-            st.session_state.procesado = False
-            st.rerun()
+        st.sidebar.download_button(f"📥 DESCARGAR PNG CORREGIDO", buf.getvalue(), nombre_descarga, "image/png")
+    else:
+        # Modo Visor de Ghost Pixels (Magenta)
+        vis = datos.copy()
+        vis[(a > 0) & (a < 255)] = [255, 0, 255, 255]
+        img_visor = Image.fromarray(vis)
 
-    # ÁREA DE TRABAJO
-    st.markdown(f"#### Control de Calidad: {archivo.name.upper()}")
-    
+    # VISOR DE ALTA PRECISIÓN (OCUPA TODA LA DERECHA)
     buffered = io.BytesIO()
     img_visor.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
     
     html_visor = f"""
-    <div class="mesa-trabajo" id="wrapper">
-        <canvas id="canvas" style="cursor: grab; width: 100%; height: 100%;"></canvas>
+    <div class="mesa-trabajo" id="box">
+        <canvas id="canvas"></canvas>
     </div>
     <script>
-        const wrapper = document.getElementById('wrapper');
+        const box = document.getElementById('box');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const img = new Image();
@@ -107,21 +143,23 @@ if archivo:
 
         let scale = 1, viewX = 0, viewY = 0, isPanning = false, startX, startY;
 
-        function init() {{
-            canvas.width = wrapper.clientWidth;
-            canvas.height = wrapper.clientHeight;
-            // Ajuste inicial centrado
-            scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.8;
-            viewX = (canvas.width - img.width * scale) / 2;
-            viewY = (canvas.height - img.height * scale) / 2;
-            draw();
+        function fit() {{
+            canvas.width = box.clientWidth;
+            canvas.height = box.clientHeight;
+            if (img.width > 0) {{
+                scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.9;
+                viewX = (canvas.width - img.width * scale) / 2;
+                viewY = (canvas.height - img.height * scale) / 2;
+                draw();
+            }}
         }}
 
-        img.onload = init;
+        img.onload = fit;
+        window.onresize = fit;
 
         function draw() {{
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.imageSmoothingEnabled = false; // Píxel crudo siempre
+            ctx.imageSmoothingEnabled = false;
             ctx.save();
             ctx.translate(viewX, viewY);
             ctx.scale(scale, scale);
@@ -131,30 +169,16 @@ if archivo:
 
         canvas.onwheel = (e) => {{
             e.preventDefault();
-            const zoom = e.deltaY > 0 ? 0.85 : 1.15;
-            const mouseX = e.offsetX, mouseY = e.offsetY;
-            
-            // Cálculo de zoom sobre el punto del mouse
-            viewX = mouseX - (mouseX - viewX) * zoom;
-            viewY = mouseY - (mouseY - viewY) * zoom;
+            const zoom = e.deltaY > 0 ? 0.8 : 1.2;
+            const mX = e.offsetX, mY = e.offsetY;
+            viewX = mX - (mX - viewX) * zoom;
+            viewY = mY - (mY - viewY) * zoom;
             scale *= zoom;
-            
-            // Límites para que no desaparezca
-            if (scale > 150) scale = 150;
-            if (scale < 0.01) scale = 0.01;
-            
             draw();
         }};
 
-        canvas.onmousedown = (e) => {{ 
-            isPanning = true; 
-            startX = e.offsetX - viewX; 
-            startY = e.offsetY - viewY; 
-            canvas.style.cursor = 'grabbing'; 
-        }};
-
-        window.onmouseup = () => {{ isPanning = false; canvas.style.cursor = 'grab'; }};
-        
+        canvas.onmousedown = (e) => {{ isPanning = true; startX = e.offsetX - viewX; startY = e.offsetY - viewY; }};
+        window.onmouseup = () => isPanning = false;
         canvas.onmousemove = (e) => {{
             if (!isPanning) return;
             viewX = e.offsetX - startX;
@@ -163,9 +187,7 @@ if archivo:
         }};
     </script>
     """
-    # El alto del iframe es fijo y un poco mayor al vh para evitar el estiramiento
-    st.components.v1.html(html_visor, height=820, scrolling=False)
+    st.components.v1.html(html_visor, height=900, scrolling=False)
 
 else:
-    st.session_state.procesado = False
-    st.info("Esperando archivo para Corrección Strategia Ink.")
+    st.info("Sube una imagen para activar el panel de control.")
