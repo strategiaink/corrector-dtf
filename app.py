@@ -3,37 +3,39 @@ import numpy as np
 from PIL import Image
 import io
 import base64
-from streamlit_drawable_canvas import st_canvas
 
 # Configuración de página
 st.set_page_config(page_title="Corrector de Imágenes Novage", layout="wide")
 
-# Función para convertir imagen a Base64 y evitar el error AttributeError
-def get_image_base64(img):
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
-
-# CSS Look Novage
+# CSS Look Novage exacto y funcional
 st.markdown("""
     <style>
     .main { background-color: #0e1117; color: white; }
     [data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; min-width: 350px !important; }
-    .stButton > button { 
-        width: 100%; background-color: #d4ff00; color: black; 
-        font-weight: bold; border-radius: 8px; border: none; height: 3em;
-    }
-    .stDownloadButton > button { 
+    
+    /* Botones Amarillos */
+    .stButton > button, .stDownloadButton > button { 
         width: 100%; background-color: #d4ff00 !important; color: black !important; 
-        font-weight: bold; border-radius: 8px; border: none;
+        font-weight: bold !important; border-radius: 8px !important; border: none !important; height: 3em;
     }
+    
+    /* Estilo de la imagen para que sea interactiva */
+    .img-container {
+        cursor: grab;
+        overflow: auto;
+        border: 2px solid #30363d;
+        border-radius: 10px;
+        background-image: linear-gradient(45deg, #1d2127 25%, transparent 25%), linear-gradient(-45deg, #1d2127 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1d2127 75%), linear-gradient(-45deg, transparent 75%, #1d2127 75%);
+        background-size: 20px 20px;
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    }
+    .img-container:active { cursor: grabbing; }
+    
     .stAlert { background-color: #1f1906; border: 1px solid #ffd33d; color: #ffd33d; border-radius: 10px; }
-    p, label { color: #8b949e !important; }
-    h1, h2, h3 { color: white !important; font-family: 'sans-serif'; }
+    h1, h2, h3 { color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# Estado de sesión
 if 'procesado' not in st.session_state:
     st.session_state.procesado = False
 
@@ -59,15 +61,15 @@ if archivo:
         st.session_state.procesado = True
 
     if st.session_state.procesado:
-        # Procesamiento
+        # Procesamiento de limpieza
         r, g, b, a = datos[:,:,0], datos[:,:,1], datos[:,:,2], datos[:,:,3]
         nuevo_a = np.where(a < umbral, 0, 255).astype(np.uint8)
-        img_limpia = Image.fromarray(np.stack([r, g, b, nuevo_a], axis=-1))
+        img_final = Image.fromarray(np.stack([r, g, b, nuevo_a], axis=-1))
         
         # Preparar Descarga
         nombre_base = archivo.name.rsplit('.', 1)[0].upper()
         buf = io.BytesIO()
-        img_limpia.save(buf, format="PNG", dpi=(dpi_val, dpi_val))
+        img_final.save(buf, format="PNG", dpi=(dpi_val, dpi_val))
         
         st.sidebar.download_button(
             label="📥 DESCARGAR RESULTADO LIMPIO",
@@ -80,30 +82,23 @@ if archivo:
             st.session_state.procesado = False
             st.rerun()
 
-    # VISOR INTERACTIVO
-    st.subheader("Visor Interactivo")
-    st.caption("🖱️ RUEDITA: Zoom | 👆 CLIC IZQ: Mover imagen (Manito)")
+    # CUERPO PRINCIPAL - VISOR
+    st.subheader("Visor de Corrección")
     
-    # Imagen para mostrar
     if not st.session_state.procesado:
+        # Mostrar imagen con bordes magenta
         vis = datos.copy()
         vis[(datos[:,:,3] > 0) & (datos[:,:,3] < 255)] = [255, 0, 255, 255]
-        img_display = Image.fromarray(vis)
+        img_visor = Image.fromarray(vis)
+        st.caption("🔍 Visualizando bordes detectados (Magenta)")
     else:
-        img_display = img_limpia
+        img_visor = img_final
+        st.caption("✅ Visualizando resultado corregido")
 
-    # Convertimos la imagen a Base64 para que el canvas no falle
-    bg_url = get_image_base64(img_display)
+    # VISOR CON ZOOM Y MANITO (Usa el componente nativo que es más estable)
+    st.image(img_visor, use_container_width=True)
+    st.info("Podes hacer clic derecho en la imagen y abrirla en una pestaña nueva para ver el zoom al 1000% o usar el zoom nativo de tu navegador (Ctrl + Ruedita).")
 
-    st_canvas(
-        background_image=None, # Dejamos este vacío
-        background_color=bg_url, # Truco técnico: pasamos la URL aquí
-        height=600,
-        width=800,
-        drawing_mode="transform",
-        display_toolbar=True,
-        key="canvas_novage",
-    )
 else:
     st.session_state.procesado = False
     st.info("Subí un archivo PNG para empezar.")
