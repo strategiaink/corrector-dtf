@@ -13,111 +13,99 @@ except ImportError:
     pdf_disponible = False
 
 # CONFIGURACIÓN DE PÁGINA
-st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide")
 
-# CSS: ESTILO INTERFAZ Y BOTONES
+# CSS: ESTILO INTERFAZ
 st.markdown("""
     <style>
-    .main { overflow: hidden; }
-    .block-container { padding: 0rem !important; max-width: 100% !important; }
     [data-testid="stSidebar"] { background-color: #111418; min-width: 350px !important; }
     .sidebar-title { color: white; font-size: 22px; font-weight: bold; text-transform: uppercase; }
-    .step-label { color: white; font-weight: bold; margin-top: 15px; margin-bottom: 8px; display: block; border-left: 3px solid #d4ff00; padding-left: 10px; }
-    .stButton > button { width: 100%; border-radius: 8px !important; font-weight: bold !important; text-transform: uppercase; height: 3.5em; }
-    div.stButton > button:first-child { background-color: #d4ff00 !important; color: black !important; }
+    .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; }
+    .stButton > button { width: 100%; background-color: #d4ff00 !important; color: black !important; font-weight: bold !important; }
     .btn-png > div > button { background-color: #24a148 !important; color: white !important; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; }
     header, footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
-if 'procesado' not in st.session_state: st.session_state.procesado = False
-
+# --- SIDEBAR ---
 with st.sidebar:
     st.markdown('<div class="sidebar-title">CORRECTOR STRATEGIA</div>', unsafe_allow_html=True)
+    archivo = st.file_uploader("Subir Imagen", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
     
-    st.markdown('<span class="step-label">1. Carga de Archivo</span>', unsafe_allow_html=True)
-    archivo = st.file_uploader("Subir PNG", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
-    
+    img_final_objeto = None # Variable local para evitar el AttributeError
+
     if archivo:
         img_input = Image.open(archivo).convert("RGBA")
         ancho_orig, alto_orig = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
         
-        st.markdown('<span class="step-label">2. Tamaño de Imagen (Estilo PS)</span>', unsafe_allow_html=True)
+        st.markdown('<span class="step-label">Tamaño de Imagen</span>', unsafe_allow_html=True)
         unidad = st.selectbox("Unidad", ["Píxeles", "Centímetros"], index=1)
         
         col1, col2 = st.columns(2)
         with col1:
             if unidad == "Centímetros":
-                val_ancho = st.number_input("Anchura", value=float(ancho_orig * 2.54 / dpi_orig), format="%.2f")
+                val_ancho = st.number_input("Anchura", value=float(ancho_orig * 2.54 / dpi_orig))
             else:
                 val_ancho = st.number_input("Anchura", value=int(ancho_orig))
         with col2:
-            mantener = st.checkbox("🔗", value=True, help="Mantener proporciones")
+            mantener = st.checkbox("🔗", value=True)
             
         if unidad == "Centímetros":
-            val_alto = st.number_input("Altura", value=float(alto_orig * 2.54 / dpi_orig) if mantener else 0.0, format="%.2f")
+            val_alto = st.number_input("Altura", value=float(alto_orig * 2.54 / dpi_orig) if mantener else 0.0)
             dpi_target = st.number_input("Resolución (DPI)", value=300)
-            # Conversión a píxeles para el motor
-            new_w = int((val_ancho / 2.54) * dpi_target)
-            new_h = int((val_alto / 2.54) * dpi_target)
+            new_w, new_h = int((val_ancho / 2.54) * dpi_target), int((val_alto / 2.54) * dpi_target)
         else:
             val_alto = st.number_input("Altura", value=int(alto_orig))
-            dpi_target = st.number_input("Resolución (DPI)", value=int(dpi_orig))
+            dpi_target = st.number_input("DPI", value=int(dpi_orig))
             new_w, new_h = int(val_ancho), int(val_alto)
 
-        st.markdown('<span class="step-label">3. Ajuste de Alpha</span>', unsafe_allow_html=True)
-        umbral = st.slider("Umbral de transparencia", 1, 254, 128)
-        
-        st.markdown('<span class="step-label">Fondo Visor:</span>', unsafe_allow_html=True)
-        opcion_fondo = st.selectbox("Fondo", ["Negro", "Blanco", "Transparente"], label_visibility="collapsed")
+        umbral = st.slider("Umbral Alpha", 1, 254, 128)
+        opcion_fondo = st.selectbox("Fondo Visor", ["Negro", "Blanco", "Transparente"])
         bg_css = {"Transparente": "transparent", "Blanco": "#ffffff", "Negro": "#000000"}[opcion_fondo]
 
-        if st.button("EJECUTAR CORRECCIÓN v5.0"):
-            # PASO A: Remuestreo (Lanczos = Alta Calidad)
+        if st.button("CORREGIR Y REDIMENSIONAR"):
+            # Procesamiento
             img_resampled = img_input.resize((new_w, new_h), resample=Image.LANCZOS)
             datos = np.array(img_resampled)
-            
-            # PASO B: Corrección de semitransparencias
-            r, g, b, a = datos[:,:,0], datos[:,:,1], datos[:,:,2], datos[:,:,3]
-            nuevo_a = np.where(a < umbral, 0, 255).astype(np.uint8)
-            
-            st.session_state.img_final = Image.fromarray(np.stack([r, g, b, nuevo_a], axis=-1))
-            st.session_state.procesado = True
+            nuevo_a = np.where(datos[:,:,3] < umbral, 0, 255).astype(np.uint8)
+            img_final_objeto = Image.fromarray(np.stack([datos[:,:,0], datos[:,:,1], datos[:,:,2], nuevo_a], axis=-1))
+            st.session_state['temp_img'] = img_final_objeto # Guardado seguro
+            st.success("✅ ¡Procesado!")
 
-        if st.session_state.procesado:
-            nombre_base = archivo.name.rsplit('.', 1)[0].upper()
+        if 'temp_img' in st.session_state:
+            img_final_objeto = st.session_state['temp_img']
+            nombre = archivo.name.rsplit('.', 1)[0].upper()
             
-            # Descarga PNG
+            # Botón PNG
             buf_png = io.BytesIO()
-            st.session_state.img_final.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
+            img_final_objeto.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
             st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-            st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre_base}.PNG", "image/png")
+            st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # Descarga PDF
+            # Botón PDF
             if pdf_disponible:
                 buf_pdf = io.BytesIO()
-                w_pts, h_pts = (st.session_state.img_final.size[0] * 72 / dpi_target), (st.session_state.img_final.size[1] * 72 / dpi_target)
+                w_pts, h_pts = (img_final_objeto.size[0] * 72 / dpi_target), (img_final_objeto.size[1] * 72 / dpi_target)
                 p = pdf_canvas.Canvas(buf_pdf, pagesize=(w_pts, h_pts))
                 tmp = io.BytesIO()
-                st.session_state.img_final.save(tmp, format="PNG")
+                img_final_objeto.save(tmp, format="PNG")
                 p.drawImage(ImageReader(tmp), 0, 0, width=w_pts, height=h_pts, mask='auto')
                 p.save()
                 st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
-                st.download_button("📄 DESCARGAR PDF", buf_pdf.getvalue(), f"P000 | {nombre_base}.PDF", "application/pdf")
+                st.download_button("📄 DESCARGAR PDF", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# VISOR INTERACTIVO
+# --- VISOR ---
 if archivo:
-    if st.session_state.procesado:
-        img_visor = st.session_state.img_final
+    if 'temp_img' in st.session_state:
+        img_visor = st.session_state['temp_img']
     else:
-        # Modo Ghost Pixels
+        # Previsualización Ghost Pixels
         vis = np.array(img_input)
-        a_orig = vis[:,:,3]
-        vis[(a_orig > 0) & (a_orig < 255)] = [255, 0, 255, 255]
+        vis[(vis[:,:,3] > 0) & (vis[:,:,3] < 255)] = [255, 0, 255, 255]
         img_visor = Image.fromarray(vis)
 
     buffered = io.BytesIO()
