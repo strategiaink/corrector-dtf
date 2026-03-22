@@ -7,45 +7,35 @@ import base64
 # CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS PARA ELIMINAR MÁRGENES Y EXPANDIR VISOR
+# CSS PARA ÁREA DE TRABAJO FIJA
 st.markdown("""
     <style>
-    /* Forzar ancho completo de la página */
+    /* Eliminar scroll lateral y márgenes de Streamlit */
+    .main { overflow: hidden; }
     .block-container {
-        padding-top: 0rem !important;
+        padding-top: 1rem !important;
         padding-bottom: 0rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
         max-width: 98% !important;
     }
     
-    /* Estilo Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #161b22;
-        min-width: 350px !important;
-    }
-
     /* Botones Strategia Ink */
     .stButton > button, .stDownloadButton > button { 
         width: 100%; background-color: #d4ff00 !important; color: black !important; 
         font-weight: bold !important; border-radius: 8px !important; border: none !important;
-        height: 3.5em; text-transform: uppercase;
+        height: 3em; text-transform: uppercase;
     }
 
-    /* Ocultar textos de límite de Streamlit */
-    [data-testid="stFileUploadDropzone"] div div { display: none; }
-    [data-testid="stFileUploadDropzone"]::before { content: "Arrastra tu imagen aquí"; color: #888; }
-
-    /* Contenedor del Visor Dinámico */
-    .visor-container {
+    /* EL CONTENEDOR MAESTRO: No se expande, es fijo */
+    .mesa-trabajo {
         width: 100%;
-        height: 88vh; /* 88% del alto de la ventana */
+        height: 85vh; 
         border: 2px solid #30363d;
         border-radius: 12px;
         background-color: #1a1a1a;
         background-image: radial-gradient(#333 1px, transparent 1px);
         background-size: 20px 20px;
-        overflow: hidden;
+        position: relative;
+        overflow: hidden; /* Crucial: nada sale de acá */
     }
     </style>
     """, unsafe_allow_html=True)
@@ -64,10 +54,10 @@ if archivo:
     datos = np.array(img_orig)
     r, g, b, a = datos[:,:,0], datos[:,:,1], datos[:,:,2], datos[:,:,3]
     
-    # Detección Ghost Pixels
+    # Mensajes de estado
     hay_semi = np.any((a > 0) & (a < 255))
     if hay_semi:
-        st.sidebar.markdown('<div style="background-color: #1f1906; color: #ffd33d; padding:10px; border-radius:10px; border: 1px solid #ffd33d; text-align:center; font-weight:bold; margin-bottom:10px;">⚠️ ATENCIÓN: GHOST PIXELS DETECTADOS.</div>', unsafe_allow_html=True)
+        st.sidebar.markdown('<div style="background-color: #1f1906; color: #ffd33d; padding:10px; border-radius:10px; border: 1px solid #ffd33d; text-align:center; font-weight:bold; margin-bottom:10px;">⚠️ GHOST PIXELS DETECTADOS.</div>', unsafe_allow_html=True)
     else:
         st.sidebar.markdown('<div style="background-color: #061f10; color: #3df18d; padding:10px; border-radius:10px; border: 1px solid #3df18d; text-align:center; font-weight:bold; margin-bottom:10px;">✅ IMAGEN LIMPIA.</div>', unsafe_allow_html=True)
 
@@ -97,7 +87,7 @@ if archivo:
             st.session_state.procesado = False
             st.rerun()
 
-    # ÁREA DE VISOR COMPLETA
+    # ÁREA DE TRABAJO
     st.markdown(f"#### Control de Calidad: {archivo.name.upper()}")
     
     buffered = io.BytesIO()
@@ -105,11 +95,11 @@ if archivo:
     img_str = base64.b64encode(buffered.getvalue()).decode()
     
     html_visor = f"""
-    <div class="visor-container" id="container">
+    <div class="mesa-trabajo" id="wrapper">
         <canvas id="canvas" style="cursor: grab; width: 100%; height: 100%;"></canvas>
     </div>
     <script>
-        const container = document.getElementById('container');
+        const wrapper = document.getElementById('wrapper');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const img = new Image();
@@ -117,24 +107,21 @@ if archivo:
 
         let scale = 1, viewX = 0, viewY = 0, isPanning = false, startX, startY;
 
-        function resize() {{
-            canvas.width = container.clientWidth;
-            canvas.height = container.clientHeight;
+        function init() {{
+            canvas.width = wrapper.clientWidth;
+            canvas.height = wrapper.clientHeight;
+            // Ajuste inicial centrado
+            scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.8;
+            viewX = (canvas.width - img.width * scale) / 2;
+            viewY = (canvas.height - img.height * scale) / 2;
             draw();
         }}
 
-        img.onload = () => {{
-            scale = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.9;
-            viewX = (canvas.width - img.width * scale) / 2;
-            viewY = (canvas.height - img.height * scale) / 2;
-            resize();
-        }};
-
-        window.onresize = resize;
+        img.onload = init;
 
         function draw() {{
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.imageSmoothingEnabled = false; // MUESTRA PÍXEL CRUDO
+            ctx.imageSmoothingEnabled = false; // Píxel crudo siempre
             ctx.save();
             ctx.translate(viewX, viewY);
             ctx.scale(scale, scale);
@@ -144,29 +131,41 @@ if archivo:
 
         canvas.onwheel = (e) => {{
             e.preventDefault();
-            const zoom = e.deltaY > 0 ? 0.8 : 1.2;
+            const zoom = e.deltaY > 0 ? 0.85 : 1.15;
             const mouseX = e.offsetX, mouseY = e.offsetY;
+            
+            // Cálculo de zoom sobre el punto del mouse
             viewX = mouseX - (mouseX - viewX) * zoom;
             viewY = mouseY - (mouseY - viewY) * zoom;
             scale *= zoom;
-            if (scale > 100) scale = 100;
+            
+            // Límites para que no desaparezca
+            if (scale > 150) scale = 150;
+            if (scale < 0.01) scale = 0.01;
+            
             draw();
         }};
 
-        canvas.onmousedown = (e) => {{ isPanning = true; startX = e.offsetX - viewX; startY = e.offsetY - viewY; canvas.style.cursor = 'grabbing'; }};
+        canvas.onmousedown = (e) => {{ 
+            isPanning = true; 
+            startX = e.offsetX - viewX; 
+            startY = e.offsetY - viewY; 
+            canvas.style.cursor = 'grabbing'; 
+        }};
+
         window.onmouseup = () => {{ isPanning = false; canvas.style.cursor = 'grab'; }};
+        
         canvas.onmousemove = (e) => {{
             if (!isPanning) return;
             viewX = e.offsetX - startX;
             viewY = e.offsetY - startY;
             draw();
         }};
-        
-        setInterval(resize, 500); // Forzar ajuste
     </script>
     """
-    st.components.v1.html(html_visor, height=900)
+    # El alto del iframe es fijo y un poco mayor al vh para evitar el estiramiento
+    st.components.v1.html(html_visor, height=820, scrolling=False)
 
 else:
     st.session_state.procesado = False
-    st.info("Sube un archivo PNG para iniciar Strategia Ink.")
+    st.info("Esperando archivo para Corrección Strategia Ink.")
