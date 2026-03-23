@@ -13,7 +13,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS - DISEÑO COMPLETO MANTENIDO
+# CSS - DISEÑO LATERAL Y BOTONES
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -36,6 +36,8 @@ PRESETS = {
     "A3 (29.7 x 42 cm)": (29.7, 42.0),
     "A4 (21 x 29.7 cm)": (21.0, 29.7)
 }
+
+if 'rst' not in st.session_state: st.session_state['rst'] = 0
 
 with st.sidebar:
     st.markdown('<div class="sidebar-title">CORRECTOR STRATEGIA</div>', unsafe_allow_html=True)
@@ -63,7 +65,7 @@ with st.sidebar:
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
         fondo_opcion = st.selectbox("Fondo", ["Cuadriculado", "Negro", "Blanco"])
         
-        # 4. MEDIDAS
+        # 4. MEDIDAS (ESTO SOLO AFECTA A LA DESCARGA)
         st.markdown('<span class="step-label">1. Medidas de Salida</span>', unsafe_allow_html=True)
         preset = st.selectbox("Presets:", list(PRESETS.keys()))
         unidad = st.radio("Unidad:", ["Centímetros", "Píxeles"], horizontal=True)
@@ -83,42 +85,52 @@ with st.sidebar:
         umbral = st.slider("Intensidad (0 = Desactivado)", 0, 254, 0)
         
         if st.button("CENTRAR IMAGEN", use_container_width=True):
-            st.session_state['rst'] = st.session_state.get('rst', 0) + 1
-
-        # PROCESO DE ALTA CALIDAD PARA DESCARGA
-        fw, fh = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
-        img_res = img_input.resize((fw, fh), resample=Image.LANCZOS)
-        if umbral > 0:
-            pix_f = np.array(img_res)
-            new_a = np.where(pix_f[:,:,3] < umbral, 0, 255).astype(np.uint8)
-            img_final = Image.fromarray(np.stack([pix_f[:,:,0], pix_f[:,:,1], pix_f[:,:,2], new_a], axis=-1))
-        else:
-            img_final = img_res
+            st.session_state['rst'] += 1
 
         st.markdown("---")
         nombre = archivo.name.rsplit('.', 1)[0].upper()
         
-        # BOTONES DESCARGA
-        b_png = io.BytesIO()
-        img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
+        # --- LÓGICA DE PROCESAMIENTO PESADO SÓLO AL TOCAR BOTONES ---
+        def preparar_imagen():
+            fw, fh = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
+            img_res = img_input.resize((fw, fh), resample=Image.LANCZOS)
+            if umbral > 0:
+                pix_f = np.array(img_res)
+                new_a = np.where(pix_f[:,:,3] < umbral, 0, 255).astype(np.uint8)
+                return Image.fromarray(np.stack([pix_f[:,:,0], pix_f[:,:,1], pix_f[:,:,2], new_a], axis=-1))
+            return img_res
+
+        # BOTONES DE DESCARGA
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-        st.download_button("📥 DESCARGAR PNG", b_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+        if st.button("📥 DESCARGAR PNG"):
+            img_final = preparar_imagen()
+            b_png = io.BytesIO()
+            img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
+            st.download_button("Click para guardar PNG", b_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if pdf_disponible:
-            b_pdf = io.BytesIO()
-            pw, ph = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
-            c = pdf_canvas.Canvas(b_pdf, pagesize=(pw, ph)); tmp = io.BytesIO(); img_final.save(tmp, format="PNG")
-            c.drawImage(ImageReader(tmp), 0, 0, width=pw, height=ph, mask='auto'); c.save()
             st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
-            st.download_button("📄 DESCARGAR PDF (DTF)", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
+            if st.button("📄 GENERAR PDF (DTF)"):
+                img_final = preparar_imagen()
+                b_pdf = io.BytesIO()
+                pw, ph = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
+                c = pdf_canvas.Canvas(b_pdf, pagesize=(pw, ph)); tmp = io.BytesIO(); img_final.save(tmp, format="PNG")
+                c.drawImage(ImageReader(tmp), 0, 0, width=pw, height=ph, mask='auto'); c.save()
+                st.download_button("Click para guardar PDF", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR CORREGIDO (SIN LAG Y SIEMPRE CARGA) ---
+# --- VISOR LIVIANO (96 DPI / MAX 1200PX) ---
 if archivo:
     v_buf = io.BytesIO()
-    # Enviamos la imagen tal cual para asegurar que cargue, el navegador se encarga del resto
-    img_input.save(v_buf, format="PNG")
+    # Generamos miniatura liviana solo para el visor
+    max_v = 1200
+    if w_px > max_v or h_px > max_v:
+        r = max_v / max(w_px, h_px)
+        img_v = img_input.resize((int(w_px*r), int(h_px*r)), resample=Image.NEAREST)
+    else: img_v = img_input
+    
+    img_v.save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
     colores = {"Negro": "#000", "Blanco": "#fff"}
@@ -134,7 +146,7 @@ if archivo:
         const c = document.getElementById('c'), x = c.getContext('2d'), im = new Image();
         im.src = "data:image/png;base64,{img_b64}";
         let s = parseFloat(sessionStorage.getItem('vs')) || 0, vx = parseFloat(sessionStorage.getItem('vx')) || 0, vy = parseFloat(sessionStorage.getItem('vy')) || 0;
-        let rst_in = {st.session_state.get('rst', 0)}, rst_st = parseInt(sessionStorage.getItem('vr')) || 0;
+        let rst_in = {st.session_state['rst']}, rst_st = parseInt(sessionStorage.getItem('vr')) || 0;
         let offC = document.createElement('canvas'), offX, drag = false, lx, ly;
 
         im.onload = () => {{
@@ -150,10 +162,7 @@ if archivo:
             if (t > 0) {{ for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255; }}
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
-                // DESACTIVAR SUAVIZADO
-                x.imageSmoothingEnabled = false;
-                x.mozImageSmoothingEnabled = false;
-                x.webkitImageSmoothingEnabled = false;
+                x.imageSmoothingEnabled = false; // PIXEL REAL
                 x.drawImage(bmp, vx, vy, im.width * s, im.height * s);
             }});
         }}
