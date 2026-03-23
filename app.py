@@ -13,7 +13,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS
+# CSS para mantener el estilo limpio y profesional
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -26,6 +26,7 @@ st.markdown("""
     .status-dirty { background-color: rgba(255, 165, 0, 0.1); border-color: orange; color: orange; }
     .btn-png > div > button { background-color: #24a148 !important; color: white !important; font-weight: bold !important; height: 3em; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; font-weight: bold !important; height: 3em; }
+    .btn-center > div > button { background-color: #d4ff00 !important; color: black !important; font-weight: bold !important; margin-top: 10px; }
     header, footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
@@ -38,45 +39,50 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         pix_orig = np.array(img_input)
         
-        # 1. ANALIZADOR DE SEMITRANSPARENCIAS
-        # Buscamos píxeles que no sean ni 0 ni 255 en el canal Alpha
+        # --- CARTEL DE AVISO (REQUISITO FUNDAMENTAL) ---
         tiene_semi = np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255))
         if tiene_semi:
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="status-box status-clean">✅ LIMPIO (SIN SEMITRANSPARENCIAS)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-box status-clean">✅ LIMPIO</div>', unsafe_allow_html=True)
 
-        # 2. INFO ORIGINAL
+        # INFO DE ARCHIVO (ESTILO PHOTOSHOP)
         w_px, h_px = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
-        st.markdown(f'<span style="color:#888; font-size:12px;">Original: {w_px}x{h_px}px | {dpi_orig} DPI</span>', unsafe_allow_html=True)
+        st.markdown(f'<p style="color:#888; font-size:12px; margin:0;">{w_px}x{h_px} px | {dpi_orig} DPI</p>', unsafe_allow_html=True)
 
-        # 3. AJUSTES
-        st.markdown('<span class="step-label">1. Medidas y Resolución</span>', unsafe_allow_html=True)
-        dpi_target = st.number_input("DPI de salida", value=300)
-        ancho_cm = st.number_input("Ancho final (cm)", value=float(round(w_px * 2.54 / dpi_orig, 2)))
-        alto_cm = st.number_input("Alto final (cm)", value=float(round(h_px * 2.54 / dpi_orig, 2)))
+        st.markdown('<span class="step-label">1. Medidas de Salida</span>', unsafe_allow_html=True)
+        dpi_target = st.number_input("DPI", value=300)
+        ancho_cm = st.number_input("Ancho (cm)", value=float(round(w_px * 2.54 / dpi_orig, 2)))
+        alto_cm = st.number_input("Alto (cm)", value=float(round(h_px * 2.54 / dpi_orig, 2)))
 
-        st.markdown('<span class="step-label">2. Intensidad de Limpieza</span>', unsafe_allow_html=True)
-        # Sincronizamos este slider con el del visor
-        umbral = st.slider("Nivel de Umbral (Photoshop)", 1, 254, 128, help="Más alto = Come más bordes")
+        st.markdown('<span class="step-label">2. Umbral de Limpieza</span>', unsafe_allow_html=True)
+        # El valor de este slider es el que MANDARÁ en la descarga
+        umbral = st.slider("Intensidad (Photoshop)", 1, 254, 128)
         
+        st.markdown('<div class="btn-center">', unsafe_allow_html=True)
         if st.button("CENTRAR IMAGEN"):
             st.session_state['reset_v'] = st.session_state.get('reset_v', 0) + 1
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        # PROCESO DE LIMPIEZA AGRESIVA (Igual a Photoshop)
-        f_w, f_h = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
-        # Aplicamos el corte: si alpha < umbral -> 0, si no -> 255
+        # --- PROCESO DE LIMPIEZA REAL PARA DESCARGA ---
+        # 1. Aplicamos umbral drástico: < umbral -> transparente (0), >= umbral -> sólido (255)
         mascara = np.where(pix_orig[:,:,3] < umbral, 0, 255).astype(np.uint8)
-        img_final = Image.fromarray(np.stack([pix_orig[:,:,0], pix_orig[:,:,1], pix_orig[:,:,2], mascara], axis=-1)).resize((f_w, f_h), resample=Image.LANCZOS)
+        # 2. Creamos la imagen limpia combinando colores originales y la máscara nueva
+        img_limpia = Image.fromarray(np.stack([pix_orig[:,:,0], pix_orig[:,:,1], pix_orig[:,:,2], mascara], axis=-1))
+        # 3. Redimensionamos el resultado YA LIMPIO
+        f_w, f_h = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
+        img_final = img_limpia.resize((f_w, f_h), resample=Image.LANCZOS)
 
-        # 4. DESCARGAS
         st.markdown("---")
         nombre = archivo.name.rsplit('.', 1)[0].upper()
-        buf_p = io.BytesIO()
-        img_final.save(buf_p, format="PNG", dpi=(dpi_target, dpi_target))
+        
+        # Generación de archivos
+        buf_png = io.BytesIO()
+        img_final.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
+        
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-        st.download_button("📥 DESCARGAR PNG", buf_p.getvalue(), f"P000 | {nombre}.PNG", "image/png")
+        st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if pdf_disponible:
@@ -90,26 +96,20 @@ with st.sidebar:
             st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR CON UMBRAL EN TIEMPO REAL ---
+# --- VISOR SINCRONIZADO ---
 if archivo:
+    # Imagen optimizada para el visor (1000px)
     v_buf = io.BytesIO()
     img_input.resize((1000, int(1000 * h_px / w_px))).save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
     st.components.v1.html(f"""
     <div style="background-color: #000; width: 100vw; height: 100vh; overflow: hidden; position: relative;">
-        <div style="position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; border: 1px solid #d4ff00; color: white; font-family: sans-serif;">
-            <p style="margin:0; font-size:12px; color:#d4ff00;">CONTROL DE UMBRAL</p>
-            <input type="range" id="u" min="1" max="254" value="{umbral}" style="width:150px; accent-color:#d4ff00;">
-            <b id="uv">{umbral}</b>
-        </div>
         <canvas id="c" style="cursor: move;"></canvas>
     </div>
     <script>
         const c = document.getElementById('c'), x = c.getContext('2d'), im = new Image();
-        const sl = document.getElementById('u'), sv = document.getElementById('uv');
         im.src = "data:image/png;base64,{img_b64}";
-        
         let s = parseFloat(sessionStorage.getItem('v_s')) || 0, vx = parseFloat(sessionStorage.getItem('v_vx')) || 0, vy = parseFloat(sessionStorage.getItem('v_vy')) || 0;
         let rst = {st.session_state.get('reset_v', 0)}, sR = parseInt(sessionStorage.getItem('v_r')) || 0;
         let offC = document.createElement('canvas'), offX, drag = false, lx, ly;
@@ -120,12 +120,10 @@ if archivo:
             if(s === 0 || rst > sR) rc(); else render();
         }};
 
-        sl.oninput = () => {{ sv.innerText = sl.value; render(); }};
-
         function render() {{
             offX.clearRect(0, 0, offC.width, offC.height);
             offX.drawImage(im, 0, 0);
-            let id = offX.getImageData(0, 0, offC.width, offC.height), d = id.data, t = parseInt(sl.value);
+            let id = offX.getImageData(0, 0, offC.width, offC.height), d = id.data, t = {umbral};
             for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
