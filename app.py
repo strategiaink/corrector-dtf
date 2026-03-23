@@ -13,7 +13,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS - MANTIENE TODO EL DISEÑO
+# CSS - MANTIENE DISEÑO LATERAL, BOTONES Y COLORES
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -47,29 +47,28 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         pix_orig = np.array(img_input)
         
-        # 1. ESTADO
+        # 1. ESTADO DE LA IMAGEN
         tiene_semi = np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255))
         if tiene_semi:
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-box status-clean">✅ LIMPIO</div>', unsafe_allow_html=True)
 
-        # 2. INFO ORIGINAL
+        # 2. INFORMACIÓN ORIGINAL
         w_px, h_px = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
         w_cm_o, h_cm_o = round(w_px * 2.54 / dpi_orig, 2), round(h_px * 2.54 / dpi_orig, 2)
         st.markdown('<span class="step-label">Información Original</span>', unsafe_allow_html=True)
         st.write(f"📏 {w_px}x{h_px}px | {dpi_orig}DPI | {w_cm_o}x{h_cm_o}cm")
 
-        # 3. CONFIGURACIÓN VISOR
+        # 3. CONFIGURACIÓN DEL VISOR
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
         fondo_opcion = st.selectbox("Fondo", ["Cuadriculado", "Negro", "Blanco"])
         
-        # 4. MEDIDAS (SOLO PARA DESCARGA)
+        # 4. MEDIDAS DE SALIDA
         st.markdown('<span class="step-label">1. Medidas de Salida</span>', unsafe_allow_html=True)
         preset = st.selectbox("Presets:", list(PRESETS.keys()))
         unidad = st.radio("Unidad:", ["Centímetros", "Píxeles"], horizontal=True)
-        dpi_target = st.number_input("DPI de salida", value=int(dpi_orig))
         
         if preset != "Personalizado":
             ancho_cm, alto_cm = PRESETS[preset]
@@ -80,9 +79,9 @@ with st.sidebar:
             else:
                 ancho_px = st.number_input("Ancho (px)", value=w_px)
                 alto_px = st.number_input("Alto (px)", value=h_px)
-                ancho_cm, alto_cm = (ancho_px * 2.54) / dpi_target, (alto_px * 2.54) / dpi_target
+                ancho_cm, alto_cm = (ancho_px * 2.54) / dpi_orig, (alto_px * 2.54) / dpi_orig
 
-        # 5. UMBRAL
+        # 5. UMBRAL (MANTIENE ZOOM)
         st.markdown('<span class="step-label">2. Umbral de Limpieza</span>', unsafe_allow_html=True)
         umbral = st.slider("Intensidad (0 = Desactivado)", 0, 254, 0)
         
@@ -92,11 +91,10 @@ with st.sidebar:
         st.markdown("---")
         nombre = archivo.name.rsplit('.', 1)[0].upper()
         
-        # PREPARAR IMAGEN PARA DESCARGA (LÓGICA APARTE)
-        fw, fh = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
-        
-        # PNG
+        # LÓGICA DE PROCESAMIENTO PARA DESCARGA
+        fw, fh = int((ancho_cm / 2.54) * dpi_orig), int((alto_cm / 2.54) * dpi_orig)
         img_res = img_input.resize((fw, fh), resample=Image.LANCZOS)
+        
         if umbral > 0:
             pix_f = np.array(img_res)
             new_a = np.where(pix_f[:,:,3] < umbral, 0, 255).astype(np.uint8)
@@ -104,28 +102,33 @@ with st.sidebar:
         else:
             img_final = img_res
 
+        # BOTÓN PNG
         b_png = io.BytesIO()
-        img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
+        img_final.save(b_png, format="PNG", dpi=(dpi_orig, dpi_orig))
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
         st.download_button("📥 DESCARGAR PNG", b_png.getvalue(), f"P000 | {nombre}.PNG", "image/png")
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # PDF
+        # BOTÓN PDF
         if pdf_disponible:
             b_pdf = io.BytesIO()
-            pw, ph = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
+            pw, ph = (img_final.size[0] * 72 / dpi_orig), (img_final.size[1] * 72 / dpi_orig)
             c = pdf_canvas.Canvas(b_pdf, pagesize=(pw, ph)); tmp = io.BytesIO(); img_final.save(tmp, format="PNG")
             c.drawImage(ImageReader(tmp), 0, 0, width=pw, height=ph, mask='auto'); c.save()
             st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
             st.download_button("📄 DESCARGAR PDF (DTF)", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR LIVIANO (96 DPI) ---
+# --- VISOR ESTABLE (Muestra la imagen siempre) ---
 if archivo:
     v_buf = io.BytesIO()
-    # Enviamos una versión liviana para que CARGUE SI O SI
-    r = 1000 / max(w_px, h_px) if max(w_px, h_px) > 1000 else 1
-    img_v = img_input.resize((int(w_px*r), int(h_px*r)), resample=Image.NEAREST)
+    # Enviamos la imagen para el visor de forma eficiente
+    if max(w_px, h_px) > 1500:
+        r = 1500 / max(w_px, h_px)
+        img_v = img_input.resize((int(w_px*r), int(h_px*r)), resample=Image.NEAREST)
+    else:
+        img_v = img_input
+        
     img_v.save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
@@ -158,7 +161,7 @@ if archivo:
             if (t > 0) {{ for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255; }}
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
-                x.imageSmoothingEnabled = false; // PÍXEL REAL
+                x.imageSmoothingEnabled = false; // PIXEL REAL
                 x.drawImage(bmp, vx, vy, im.width * s, im.height * s);
             }});
         }}
