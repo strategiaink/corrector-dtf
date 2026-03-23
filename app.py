@@ -13,7 +13,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS - MANTIENE DISEÑO LATERAL Y BOTONES
+# CSS - DISEÑO LATERAL Y BOTONES
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -45,25 +45,25 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         pix_orig = np.array(img_input)
         
-        # 1. CARTEL DE ESTADO (MANTENIDO)
+        # 1. ESTADO REAL
         tiene_semi = np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255))
         if tiene_semi:
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-box status-clean">✅ LIMPIO</div>', unsafe_allow_html=True)
 
-        # 2. INFORMACIÓN ORIGINAL (MANTENIDO)
+        # 2. INFO ORIGINAL
         w_px, h_px = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
         w_cm_o, h_cm_o = round(w_px * 2.54 / dpi_orig, 2), round(h_px * 2.54 / dpi_orig, 2)
         st.markdown('<span class="step-label">Información Original</span>', unsafe_allow_html=True)
         st.write(f"📏 {w_px}x{h_px}px | {dpi_orig}DPI | {w_cm_o}x{h_cm_o}cm")
 
-        # 3. CONFIGURACIÓN VISOR (CUADRICULADO POR DEFECTO)
+        # 3. CONFIGURACIÓN VISOR
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
         fondo_opcion = st.selectbox("Fondo", ["Cuadriculado", "Negro", "Blanco"])
         
-        # 4. MEDIDAS Y UNIDADES (MANTENIDO)
+        # 4. MEDIDAS DE SALIDA
         st.markdown('<span class="step-label">1. Medidas de Salida</span>', unsafe_allow_html=True)
         preset = st.selectbox("Presets:", list(PRESETS.keys()))
         unidad = st.radio("Unidad:", ["Centímetros", "Píxeles"], horizontal=True)
@@ -73,21 +73,19 @@ with st.sidebar:
             ancho_cm, alto_cm = PRESETS[preset]
         else:
             if unidad == "Centímetros":
-                ancho_cm = st.number_input("Ancho (cm)", value=w_cm_o)
-                alto_cm = st.number_input("Alto (cm)", value=h_cm_o)
+                ancho_cm, alto_cm = st.number_input("Ancho (cm)", value=w_cm_o), st.number_input("Alto (cm)", value=h_cm_o)
             else:
-                ancho_px = st.number_input("Ancho (px)", value=w_px)
-                alto_px = st.number_input("Alto (px)", value=h_px)
+                ancho_px, alto_px = st.number_input("Ancho (px)", value=w_px), st.number_input("Alto (px)", value=h_px)
                 ancho_cm, alto_cm = (ancho_px * 2.54) / dpi_target, (alto_px * 2.54) / dpi_target
 
-        # 5. UMBRAL BINARIO (MANTENIDO CON LÓGICA DE LIMPIEZA POST-RESIZE)
+        # 5. UMBRAL
         st.markdown('<span class="step-label">2. Umbral de Limpieza</span>', unsafe_allow_html=True)
         umbral = st.slider("Intensidad (0 = Desactivado)", 0, 254, 0)
         
         if st.button("CENTRAR IMAGEN", use_container_width=True):
             st.session_state['rst'] = st.session_state.get('rst', 0) + 1
 
-        # PROCESAMIENTO FINAL
+        # PROCESO DE ALTA CALIDAD (SOLO PARA DESCARGA)
         fw, fh = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
         img_res = img_input.resize((fw, fh), resample=Image.LANCZOS)
         if umbral > 0:
@@ -100,7 +98,7 @@ with st.sidebar:
         st.markdown("---")
         nombre = archivo.name.rsplit('.', 1)[0].upper()
         
-        # BOTONES DE DESCARGA
+        # DESCARGAS
         b_png = io.BytesIO()
         img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
@@ -116,10 +114,17 @@ with st.sidebar:
             st.download_button("📄 DESCARGAR PDF (DTF)", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR SIN SUAVIZADO (MANTUVE LA FIX PARA VERDADERO PÍXEL) ---
+# --- VISOR OPTIMIZADO (SIN LAG - PROCESA IMAGEN LIVIANA) ---
 if archivo:
     v_buf = io.BytesIO()
-    img_input.save(v_buf, format="PNG")
+    # Bajamos la resolución SOLO PARA EL VISOR (máximo 1200px) para que vuele
+    max_v = 1200
+    if w_px > max_v or h_px > max_v:
+        ratio = max_v / max(w_px, h_px)
+        img_visor = img_input.resize((int(w_px * ratio), int(h_px * ratio)), resample=Image.NEAREST)
+    else:
+        img_visor = img_input
+    img_visor.save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
     colores = {"Negro": "#000", "Blanco": "#fff"}
@@ -151,10 +156,7 @@ if archivo:
             if (t > 0) {{ for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255; }}
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
-                // DESACTIVAR SUAVIZADO PARA VER PÍXEL REAL
-                x.imageSmoothingEnabled = false;
-                x.mozImageSmoothingEnabled = false;
-                x.webkitImageSmoothingEnabled = false;
+                x.imageSmoothingEnabled = false; // MANTENEMOS PÍXEL REAL SIN SUAVIZADO
                 x.drawImage(bmp, vx, vy, im.width * s, im.height * s);
             }});
         }}
