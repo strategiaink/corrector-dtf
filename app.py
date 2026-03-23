@@ -4,7 +4,6 @@ from PIL import Image
 import io
 import base64
 
-# ReportLab para PDF DTF
 try:
     from reportlab.pdfgen import canvas as pdf_canvas
     from reportlab.lib.utils import ImageReader
@@ -14,7 +13,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS ESTABLE
+# CSS
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -22,23 +21,14 @@ st.markdown("""
     [data-testid="stSidebar"] { background-color: #111418; min-width: 330px !important; }
     .sidebar-title { color: white; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
     .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; display: block; }
-    .info-text { color: #aaaaaa; font-size: 0.85rem; margin-bottom: 5px; }
     .status-box { padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; border: 1px solid; }
     .status-clean { background-color: rgba(36, 161, 72, 0.1); border-color: #24a148; color: #24a148; }
     .status-dirty { background-color: rgba(255, 165, 0, 0.1); border-color: orange; color: orange; }
     .btn-png > div > button { background-color: #24a148 !important; color: white !important; font-weight: bold !important; height: 3em; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; font-weight: bold !important; height: 3em; }
-    .btn-center > div > button { background-color: #d4ff00 !important; color: black !important; font-weight: bold !important; margin-top: 10px; }
     header, footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
-
-PRESETS = {
-    "Personalizado": None,
-    "A2 (42 x 59.4 cm)": (42.0, 59.4),
-    "A3 (29.7 x 42 cm)": (29.7, 42.0),
-    "A4 (21 x 29.7 cm)": (21.0, 29.7)
-}
 
 with st.sidebar:
     st.markdown('<div class="sidebar-title">CORRECTOR STRATEGIA</div>', unsafe_allow_html=True)
@@ -48,94 +38,70 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         pix_orig = np.array(img_input)
         
-        # --- 1. ANALIZADOR DE SEMITRANSPARENCIAS (RESTAURADO) ---
-        if np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255)):
+        # 1. ANALIZADOR DE SEMITRANSPARENCIAS
+        # Buscamos píxeles que no sean ni 0 ni 255 en el canal Alpha
+        tiene_semi = np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255))
+        if tiene_semi:
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-box status-clean">✅ LIMPIO (SIN SEMITRANSPARENCIAS)</div>', unsafe_allow_html=True)
 
-        # --- 2. LECTURA DE METADATOS ORIGINALES ---
-        w_orig_px, h_orig_px = img_input.size
+        # 2. INFO ORIGINAL
+        w_px, h_px = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
-        w_orig_cm = round((w_orig_px * 2.54) / dpi_orig, 2)
-        h_orig_cm = round((h_orig_px * 2.54) / dpi_orig, 2)
+        st.markdown(f'<span style="color:#888; font-size:12px;">Original: {w_px}x{h_px}px | {dpi_orig} DPI</span>', unsafe_allow_html=True)
 
-        st.markdown('<span class="step-label">Información Original</span>', unsafe_allow_html=True)
-        st.markdown(f'<p class="info-text">Resolución: {w_orig_px} x {h_orig_px} px</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="info-text">Densidad: {dpi_orig} DPI</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="info-text">Tamaño: {w_orig_cm} x {h_orig_cm} cm</p>', unsafe_allow_html=True)
+        # 3. AJUSTES
+        st.markdown('<span class="step-label">1. Medidas y Resolución</span>', unsafe_allow_html=True)
+        dpi_target = st.number_input("DPI de salida", value=300)
+        ancho_cm = st.number_input("Ancho final (cm)", value=float(round(w_px * 2.54 / dpi_orig, 2)))
+        alto_cm = st.number_input("Alto final (cm)", value=float(round(h_px * 2.54 / dpi_orig, 2)))
 
-        # --- 3. SECCIÓN DE EDICIÓN ---
-        st.markdown('<span class="step-label">1. Ajustar Medidas</span>', unsafe_allow_html=True)
-        preset = st.selectbox("Formato de salida:", list(PRESETS.keys()))
-        unidad = st.selectbox("Unidad de edición", ["Centímetros", "Píxeles"])
-        dpi_target = st.number_input("DPI de salida", value=int(dpi_orig) if dpi_orig > 71 else 300)
+        st.markdown('<span class="step-label">2. Intensidad de Limpieza</span>', unsafe_allow_html=True)
+        # Sincronizamos este slider con el del visor
+        umbral = st.slider("Nivel de Umbral (Photoshop)", 1, 254, 128, help="Más alto = Come más bordes")
         
-        if preset != "Personalizado":
-            w_cm, h_cm = PRESETS[preset]
-        else:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                if unidad == "Centímetros":
-                    w_cm = st.number_input("Ancho (cm)", value=w_orig_cm)
-                else:
-                    px_w = st.number_input("Ancho (px)", value=w_orig_px)
-                    w_cm = (px_w * 2.54) / dpi_target
-            mantener = col2.checkbox("🔗", value=True)
-            if unidad == "Centímetros":
-                h_cm = st.number_input("Alto (cm)", value=h_orig_cm if mantener else 0.0)
-            else:
-                px_h = st.number_input("Alto (px)", value=h_orig_px if mantener else 0)
-                h_cm = (px_h * 2.54) / dpi_target
-
-        # --- 4. CORRECCIÓN Y VISOR ---
-        st.markdown('<span class="step-label">2. Corrección de Bordes</span>', unsafe_allow_html=True)
-        umbral_final = st.slider("Umbral para descarga", 1, 254, 128)
-        
-        st.markdown('<div class="btn-center">', unsafe_allow_html=True)
         if st.button("CENTRAR IMAGEN"):
-            st.session_state['reset_visor'] = st.session_state.get('reset_visor', 0) + 1
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.session_state['reset_v'] = st.session_state.get('reset_v', 0) + 1
 
-        # PROCESO FINAL
-        f_w, f_h = int((w_cm / 2.54) * dpi_target), int((h_cm / 2.54) * dpi_target)
-        new_a = np.where(pix_orig[:,:,3] < umbral_final, 0, 255).astype(np.uint8)
-        img_final = Image.fromarray(np.stack([pix_orig[:,:,0], pix_orig[:,:,1], pix_orig[:,:,2], new_a], axis=-1)).resize((f_w, f_h), resample=Image.LANCZOS)
+        # PROCESO DE LIMPIEZA AGRESIVA (Igual a Photoshop)
+        f_w, f_h = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
+        # Aplicamos el corte: si alpha < umbral -> 0, si no -> 255
+        mascara = np.where(pix_orig[:,:,3] < umbral, 0, 255).astype(np.uint8)
+        img_final = Image.fromarray(np.stack([pix_orig[:,:,0], pix_orig[:,:,1], pix_orig[:,:,2], mascara], axis=-1)).resize((f_w, f_h), resample=Image.LANCZOS)
 
-        # --- 5. DESCARGAS ---
+        # 4. DESCARGAS
         st.markdown("---")
-        nombre_base = archivo.name.rsplit('.', 1)[0].upper()
-        buf_png = io.BytesIO()
-        img_final.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
+        nombre = archivo.name.rsplit('.', 1)[0].upper()
+        buf_p = io.BytesIO()
+        img_final.save(buf_p, format="PNG", dpi=(dpi_target, dpi_target))
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
-        st.download_button("📥 DESCARGAR PNG", buf_png.getvalue(), f"P000 | {nombre_base}.PNG", "image/png")
+        st.download_button("📥 DESCARGAR PNG", buf_p.getvalue(), f"P000 | {nombre}.PNG", "image/png")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if pdf_disponible:
             buf_pdf = io.BytesIO()
-            p_w, p_h = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
-            c_pdf = pdf_canvas.Canvas(buf_pdf, pagesize=(p_w, p_h))
-            img_tmp = io.BytesIO(); img_final.save(img_tmp, format="PNG")
-            c_pdf.drawImage(ImageReader(img_tmp), 0, 0, width=p_w, height=p_h, mask='auto')
-            c_pdf.save()
+            pw, ph = (img_final.size[0] * 72 / dpi_target), (img_final.size[1] * 72 / dpi_target)
+            c = pdf_canvas.Canvas(buf_pdf, pagesize=(pw, ph))
+            it = io.BytesIO(); img_final.save(it, format="PNG")
+            c.drawImage(ImageReader(it), 0, 0, width=pw, height=ph, mask='auto')
+            c.save()
             st.markdown('<div class="btn-pdf">', unsafe_allow_html=True)
-            st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre_base}.PDF", "application/pdf")
+            st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR HÍBRIDO ---
+# --- VISOR CON UMBRAL EN TIEMPO REAL ---
 if archivo:
     v_buf = io.BytesIO()
-    img_input.resize((1000, int(1000 * h_orig_px / w_orig_px))).save(v_buf, format="PNG")
+    img_input.resize((1000, int(1000 * h_px / w_px))).save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
-    reset_val = st.session_state.get('reset_visor', 0)
     
     st.components.v1.html(f"""
-    <div style="background-color: #000; width: 100vw; height: 100vh; overflow: hidden; position: relative; font-family: sans-serif;">
-        <div style="position: absolute; top: 15px; left: 15px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 10px; border: 1px solid #d4ff00; color: white; min-width: 180px;">
-            <p style="margin: 0 0 10px 0; font-weight: bold; color: #d4ff00; font-size: 12px;">VISOR EN VIVO</p>
-            <label style="font-size: 11px;">Umbral:</label>
-            <input type="range" id="u" min="1" max="254" value="128" style="width: 100%; cursor: pointer; accent-color: #d4ff00;">
-            <div id="uv" style="text-align: center; font-weight: bold; margin-top: 5px;">128</div>
+    <div style="background-color: #000; width: 100vw; height: 100vh; overflow: hidden; position: relative;">
+        <div style="position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; border: 1px solid #d4ff00; color: white; font-family: sans-serif;">
+            <p style="margin:0; font-size:12px; color:#d4ff00;">CONTROL DE UMBRAL</p>
+            <input type="range" id="u" min="1" max="254" value="{umbral}" style="width:150px; accent-color:#d4ff00;">
+            <b id="uv">{umbral}</b>
         </div>
         <canvas id="c" style="cursor: move;"></canvas>
     </div>
@@ -144,25 +110,22 @@ if archivo:
         const sl = document.getElementById('u'), sv = document.getElementById('uv');
         im.src = "data:image/png;base64,{img_b64}";
         
-        let s = parseFloat(sessionStorage.getItem('v_s')) || 0;
-        let vx = parseFloat(sessionStorage.getItem('v_vx')) || 0;
-        let vy = parseFloat(sessionStorage.getItem('v_vy')) || 0;
-        let lastR = {reset_val}, storR = parseInt(sessionStorage.getItem('v_r')) || 0;
+        let s = parseFloat(sessionStorage.getItem('v_s')) || 0, vx = parseFloat(sessionStorage.getItem('v_vx')) || 0, vy = parseFloat(sessionStorage.getItem('v_vy')) || 0;
+        let rst = {st.session_state.get('reset_v', 0)}, sR = parseInt(sessionStorage.getItem('v_r')) || 0;
         let offC = document.createElement('canvas'), offX, drag = false, lx, ly;
 
         im.onload = () => {{
             c.width = window.innerWidth; c.height = window.innerHeight;
-            offC.width = im.width; offC.height = im.height;
-            offX = offC.getContext('2d');
-            if(s === 0 || lastR > storR) rc(); else render();
+            offC.width = im.width; offC.height = im.height; offX = offC.getContext('2d');
+            if(s === 0 || rst > sR) rc(); else render();
         }};
 
         sl.oninput = () => {{ sv.innerText = sl.value; render(); }};
 
         function render() {{
+            offX.clearRect(0, 0, offC.width, offC.height);
             offX.drawImage(im, 0, 0);
-            let id = offX.getImageData(0, 0, offC.width, offC.height);
-            let d = id.data, t = parseInt(sl.value);
+            let id = offX.getImageData(0, 0, offC.width, offC.height), d = id.data, t = parseInt(sl.value);
             for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
@@ -174,8 +137,7 @@ if archivo:
         function rc() {{
             s = Math.min(window.innerWidth/im.width, window.innerHeight/im.height)*0.85;
             vx = (window.innerWidth - im.width*s)/2; vy = (window.innerHeight - im.height*s)/2;
-            sessionStorage.setItem('v_r', lastR);
-            render();
+            sessionStorage.setItem('v_r', rst); render();
         }}
 
         c.onwheel = (e) => {{
