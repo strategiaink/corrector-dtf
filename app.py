@@ -11,8 +11,9 @@ try:
 except ImportError:
     pdf_disponible = False
 
-st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="CORRECTOR STRATEGIA INK v20.0", layout="wide", initial_sidebar_state="expanded")
 
+# CSS - MANTIENE DISEÑO
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -29,13 +30,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-PRESETS = {
-    "Personalizado": None,
-    "A2 (42 x 59.4 cm)": (42.0, 59.4),
-    "A3 (29.7 x 42 cm)": (29.7, 42.0),
-    "A4 (21 x 29.7 cm)": (21.0, 29.7)
-}
-
 if 'rst' not in st.session_state: st.session_state['rst'] = 0
 
 with st.sidebar:
@@ -46,38 +40,25 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         pix_orig = np.array(img_input)
         
+        # 1. ESTADO
         tiene_semi = np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255))
         if tiene_semi:
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-box status-clean">✅ LIMPIO</div>', unsafe_allow_html=True)
 
+        # 2. INFO ORIGINAL
         w_px, h_px = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
-        w_cm_o, h_cm_o = round(w_px * 2.54 / dpi_orig, 2), round(h_px * 2.54 / dpi_orig, 2)
         st.markdown('<span class="step-label">Información Original</span>', unsafe_allow_html=True)
-        st.write(f"📏 {w_px}x{h_px}px | {dpi_orig}DPI | {w_cm_o}x{h_cm_o}cm")
+        st.write(f"📏 {w_px}x{h_px}px | {dpi_orig}DPI")
 
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
         fondo_opcion = st.selectbox("Fondo", ["Cuadriculado", "Negro", "Blanco"])
         
-        st.markdown('<span class="step-label">1. Medidas de Salida</span>', unsafe_allow_html=True)
-        preset = st.selectbox("Presets:", list(PRESETS.keys()))
-        unidad = st.radio("Unidad:", ["Centímetros", "Píxeles"], horizontal=True)
-        
-        if preset != "Personalizado":
-            ancho_cm, alto_cm = PRESETS[preset]
-        else:
-            if unidad == "Centímetros":
-                ancho_cm = st.number_input("Ancho (cm)", value=w_cm_o)
-                alto_cm = st.number_input("Alto (cm)", value=h_cm_o)
-            else:
-                ancho_px = st.number_input("Ancho (px)", value=w_px)
-                alto_px = st.number_input("Alto (px)", value=h_px)
-                ancho_cm, alto_cm = (ancho_px * 2.54) / dpi_orig, (alto_px * 2.54) / dpi_orig
-
-        st.markdown('<span class="step-label">2. Umbral de Limpieza</span>', unsafe_allow_html=True)
-        umbral = st.slider("Intensidad (0 = Desactivado)", 0, 254, 0)
+        # 3. UMBRAL BINARIO DURO (LIMPIEZA REAL)
+        st.markdown('<span class="step-label">Umbral de Limpieza (Alpha Binario)</span>', unsafe_allow_html=True)
+        umbral = st.slider("Corte de transparencia", 0, 254, 128)
         
         if st.button("CENTRAR IMAGEN", use_container_width=True):
             st.session_state['rst'] += 1
@@ -85,13 +66,11 @@ with st.sidebar:
         st.markdown("---")
         nombre = archivo.name.rsplit('.', 1)[0].upper()
         
-        fw, fh = int((ancho_cm / 2.54) * dpi_orig), int((alto_cm / 2.54) * dpi_orig)
-        img_res = img_input.resize((fw, fh), resample=Image.LANCZOS)
-        if umbral > 0:
-            pix_f = np.array(img_res)
-            new_a = np.where(pix_f[:,:,3] < umbral, 0, 255).astype(np.uint8)
-            img_final = Image.fromarray(np.stack([pix_f[:,:,0], pix_f[:,:,1], pix_f[:,:,2], new_a], axis=-1))
-        else: img_final = img_res
+        # PROCESAMIENTO BINARIO PARA DESCARGA
+        pix_f = np.array(img_input)
+        # Forzado de Alpha: o es 0 o es 255. Sin grises.
+        new_a = np.where(pix_f[:,:,3] < umbral, 0, 255).astype(np.uint8)
+        img_final = Image.fromarray(np.stack([pix_f[:,:,0], pix_f[:,:,1], pix_f[:,:,2], new_a], axis=-1))
 
         b_png = io.BytesIO()
         img_final.save(b_png, format="PNG", dpi=(dpi_orig, dpi_orig))
@@ -108,72 +87,57 @@ with st.sidebar:
             st.download_button("📄 DESCARGAR PDF (DTF)", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
+# --- VISOR DE PÍXEL REAL (SIN SUAVIZADO) ---
 if archivo:
     v_buf = io.BytesIO()
-    if max(w_px, h_px) > 1200:
-        r = 1200 / max(w_px, h_px)
-        img_v = img_input.resize((int(w_px*r), int(h_px*r)), resample=Image.NEAREST)
-    else: img_v = img_input
-    img_v.save(v_buf, format="PNG")
+    img_input.save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
-    colores = {"Negro": "#000", "Blanco": "#fff"}
-    bg_style = f"background-color: {colores.get(fondo_opcion, '#000')};"
-    if fondo_opcion == "Cuadriculado":
-        bg_style = "background-image: linear-gradient(45deg, #222 25%, transparent 25%), linear-gradient(-45deg, #222 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222 75%), linear-gradient(-45deg, transparent 75%, #222 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; background-color: #111;"
+    bg_style = "background-image: linear-gradient(45deg, #222 25%, transparent 25%), linear-gradient(-45deg, #222 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222 75%), linear-gradient(-45deg, transparent 75%, #222 75%); background-size: 20px 20px; background-color: #111;"
+    if fondo_opcion == "Negro": bg_style = "background-color: #000;"
+    if fondo_opcion == "Blanco": bg_style = "background-color: #fff;"
 
     st.components.v1.html(f"""
     <div style="{bg_style} width: 100vw; height: 100vh; overflow: hidden; position: relative;">
-        <canvas id="c" style="cursor: move;"></canvas>
+        <canvas id="c" style="cursor: move; image-rendering: pixelated;"></canvas>
     </div>
     <script>
-        const c = document.getElementById('c'), x = c.getContext('2d'), im = new Image();
+        const c = document.getElementById('c'), x = c.getContext('2d', {{alpha: true}}), im = new Image();
         im.src = "data:image/png;base64,{img_b64}";
-        let s, vx, vy, drag = false, lx, ly;
-        let rst_in = {st.session_state['rst']};
+        let s, vx, vy, drag = false, lx, ly, rst_in = {st.session_state['rst']};
         let offC = document.createElement('canvas'), offX;
 
         im.onload = () => {{
             c.width = window.innerWidth; c.height = window.innerHeight;
             offC.width = im.width; offC.height = im.height; offX = offC.getContext('2d');
-            
-            let stored_s = parseFloat(sessionStorage.getItem('vs'));
-            let stored_rst = parseInt(sessionStorage.getItem('vr')) || 0;
-
-            if (!stored_s || rst_in > stored_rst) {{
-                rc();
-            }} else {{
-                s = stored_s; vx = parseFloat(sessionStorage.getItem('vx')); vy = parseFloat(sessionStorage.getItem('vy'));
-                render();
-            }}
+            let st_s = parseFloat(sessionStorage.getItem('vs')), st_r = parseInt(sessionStorage.getItem('vr')) || 0;
+            if(!st_s || rst_in > st_r) rc(); else {{ s=st_s; vx=parseFloat(sessionStorage.getItem('vx')); vy=parseFloat(sessionStorage.getItem('vy')); render(); }}
         }};
 
         function render() {{
             offX.clearRect(0, 0, offC.width, offC.height);
             offX.drawImage(im, 0, 0);
             let id = offX.getImageData(0, 0, offC.width, offC.height), d = id.data, t = {umbral};
-            if (t > 0) {{ for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255; }}
+            // LIMPIEZA BINARIA PURA EN EL VISOR
+            for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
-                x.imageSmoothingEnabled = false;
+                x.imageSmoothingEnabled = false; // DESACTIVA EL SUAVIZADO DEL NAVEGADOR
                 x.drawImage(bmp, vx, vy, im.width * s, im.height * s);
             }});
         }}
         function rc() {{
             s = Math.min(window.innerWidth/im.width, window.innerHeight/im.height)*0.8;
             vx = (window.innerWidth - im.width*s)/2; vy = (window.innerHeight - im.height*s)/2;
-            sessionStorage.setItem('vs', s); sessionStorage.setItem('vx', vx); sessionStorage.setItem('vy', vy);
-            sessionStorage.setItem('vr', rst_in);
-            render();
+            sessionStorage.setItem('vs', s); sessionStorage.setItem('vx', vx); sessionStorage.setItem('vr', rst_in); render();
         }}
         c.onwheel = (e) => {{
             e.preventDefault(); const z = e.deltaY > 0 ? 0.9 : 1.1;
             vx = e.offsetX - (e.offsetX - vx)*z; vy = e.offsetY - (e.offsetY - vy)*z;
-            s *= z; sessionStorage.setItem('vs', s); sessionStorage.setItem('vx', vx); sessionStorage.setItem('vy', vy);
-            render();
+            s *= z; sessionStorage.setItem('vs', s); sessionStorage.setItem('vx', vx); sessionStorage.setItem('vy', vy); render();
         }};
         c.onmousedown = (e) => {{ drag = true; lx = e.offsetX - vx; ly = e.offsetY - vy; }};
         window.onmouseup = () => drag = false;
-        c.onmousemove = (e) => {{ if(drag) {{ vx = e.offsetX - lx; vy = e.offsetY - ly; sessionStorage.setItem('vx', vx); sessionStorage.setItem('vy', vy); render(); }} }};
+        c.onmousemove = (e) => {{ if(drag) {{ vx = e.offsetX - lx; vy = e.offsetY - ly; render(); }} }};
     </script>
     """, height=1000)
