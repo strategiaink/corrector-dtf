@@ -13,7 +13,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS - DISEÑO LATERAL Y BOTONES
+# CSS - DISEÑO COMPLETO MANTENIDO
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -45,7 +45,7 @@ with st.sidebar:
         img_input = Image.open(archivo).convert("RGBA")
         pix_orig = np.array(img_input)
         
-        # 1. ESTADO REAL
+        # 1. ESTADO
         tiene_semi = np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255))
         if tiene_semi:
             st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
@@ -63,7 +63,7 @@ with st.sidebar:
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
         fondo_opcion = st.selectbox("Fondo", ["Cuadriculado", "Negro", "Blanco"])
         
-        # 4. MEDIDAS DE SALIDA
+        # 4. MEDIDAS
         st.markdown('<span class="step-label">1. Medidas de Salida</span>', unsafe_allow_html=True)
         preset = st.selectbox("Presets:", list(PRESETS.keys()))
         unidad = st.radio("Unidad:", ["Centímetros", "Píxeles"], horizontal=True)
@@ -85,7 +85,7 @@ with st.sidebar:
         if st.button("CENTRAR IMAGEN", use_container_width=True):
             st.session_state['rst'] = st.session_state.get('rst', 0) + 1
 
-        # PROCESO DE ALTA CALIDAD (SOLO PARA DESCARGA)
+        # PROCESO DE ALTA CALIDAD PARA DESCARGA
         fw, fh = int((ancho_cm / 2.54) * dpi_target), int((alto_cm / 2.54) * dpi_target)
         img_res = img_input.resize((fw, fh), resample=Image.LANCZOS)
         if umbral > 0:
@@ -98,7 +98,7 @@ with st.sidebar:
         st.markdown("---")
         nombre = archivo.name.rsplit('.', 1)[0].upper()
         
-        # DESCARGAS
+        # BOTONES DESCARGA
         b_png = io.BytesIO()
         img_final.save(b_png, format="PNG", dpi=(dpi_target, dpi_target))
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
@@ -114,17 +114,11 @@ with st.sidebar:
             st.download_button("📄 DESCARGAR PDF (DTF)", b_pdf.getvalue(), f"P000 | {nombre}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR OPTIMIZADO (SIN LAG - PROCESA IMAGEN LIVIANA) ---
+# --- VISOR CORREGIDO (SIN LAG Y SIEMPRE CARGA) ---
 if archivo:
     v_buf = io.BytesIO()
-    # Bajamos la resolución SOLO PARA EL VISOR (máximo 1200px) para que vuele
-    max_v = 1200
-    if w_px > max_v or h_px > max_v:
-        ratio = max_v / max(w_px, h_px)
-        img_visor = img_input.resize((int(w_px * ratio), int(h_px * ratio)), resample=Image.NEAREST)
-    else:
-        img_visor = img_input
-    img_visor.save(v_buf, format="PNG")
+    # Enviamos la imagen tal cual para asegurar que cargue, el navegador se encarga del resto
+    img_input.save(v_buf, format="PNG")
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
     colores = {"Negro": "#000", "Blanco": "#fff"}
@@ -156,7 +150,10 @@ if archivo:
             if (t > 0) {{ for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255; }}
             createImageBitmap(id).then(bmp => {{
                 x.clearRect(0, 0, c.width, c.height);
-                x.imageSmoothingEnabled = false; // MANTENEMOS PÍXEL REAL SIN SUAVIZADO
+                // DESACTIVAR SUAVIZADO
+                x.imageSmoothingEnabled = false;
+                x.mozImageSmoothingEnabled = false;
+                x.webkitImageSmoothingEnabled = false;
                 x.drawImage(bmp, vx, vy, im.width * s, im.height * s);
             }});
         }}
