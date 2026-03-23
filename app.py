@@ -23,6 +23,9 @@ st.markdown("""
     .sidebar-title { color: white; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
     .step-label { color: white; font-weight: bold; margin-top: 15px; border-left: 3px solid #d4ff00; padding-left: 10px; display: block; }
     .info-text { color: #aaaaaa; font-size: 0.85rem; margin-bottom: 5px; }
+    .status-box { padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; border: 1px solid; }
+    .status-clean { background-color: rgba(36, 161, 72, 0.1); border-color: #24a148; color: #24a148; }
+    .status-dirty { background-color: rgba(255, 165, 0, 0.1); border-color: orange; color: orange; }
     .btn-png > div > button { background-color: #24a148 !important; color: white !important; font-weight: bold !important; height: 3em; }
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; font-weight: bold !important; height: 3em; }
     .btn-center > div > button { background-color: #d4ff00 !important; color: black !important; font-weight: bold !important; margin-top: 10px; }
@@ -43,8 +46,15 @@ with st.sidebar:
     
     if archivo:
         img_input = Image.open(archivo).convert("RGBA")
+        pix_orig = np.array(img_input)
         
-        # --- LECTURA DE METADATOS ORIGINALES ---
+        # --- 1. ANALIZADOR DE SEMITRANSPARENCIAS (RESTAURADO) ---
+        if np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255)):
+            st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="status-box status-clean">✅ LIMPIO (SIN SEMITRANSPARENCIAS)</div>', unsafe_allow_html=True)
+
+        # --- 2. LECTURA DE METADATOS ORIGINALES ---
         w_orig_px, h_orig_px = img_input.size
         dpi_orig = img_input.info.get('dpi', (72, 72))[0]
         w_orig_cm = round((w_orig_px * 2.54) / dpi_orig, 2)
@@ -55,7 +65,7 @@ with st.sidebar:
         st.markdown(f'<p class="info-text">Densidad: {dpi_orig} DPI</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="info-text">Tamaño: {w_orig_cm} x {h_orig_cm} cm</p>', unsafe_allow_html=True)
 
-        # --- SECCIÓN DE EDICIÓN ---
+        # --- 3. SECCIÓN DE EDICIÓN ---
         st.markdown('<span class="step-label">1. Ajustar Medidas</span>', unsafe_allow_html=True)
         preset = st.selectbox("Formato de salida:", list(PRESETS.keys()))
         unidad = st.selectbox("Unidad de edición", ["Centímetros", "Píxeles"])
@@ -71,32 +81,30 @@ with st.sidebar:
                 else:
                     px_w = st.number_input("Ancho (px)", value=w_orig_px)
                     w_cm = (px_w * 2.54) / dpi_target
-            
             mantener = col2.checkbox("🔗", value=True)
-            
             if unidad == "Centímetros":
                 h_cm = st.number_input("Alto (cm)", value=h_orig_cm if mantener else 0.0)
             else:
                 px_h = st.number_input("Alto (px)", value=h_orig_px if mantener else 0)
                 h_cm = (px_h * 2.54) / dpi_target
 
-        # --- CORRECCIÓN ---
+        # --- 4. CORRECCIÓN Y VISOR ---
         st.markdown('<span class="step-label">2. Corrección de Bordes</span>', unsafe_allow_html=True)
         umbral_final = st.slider("Umbral para descarga", 1, 254, 128)
         
-        if st.button("CENTRAR VISOR"):
+        st.markdown('<div class="btn-center">', unsafe_allow_html=True)
+        if st.button("CENTRAR IMAGEN"):
             st.session_state['reset_visor'] = st.session_state.get('reset_visor', 0) + 1
+        st.markdown('</div>', unsafe_allow_html=True)
 
         # PROCESO FINAL
         f_w, f_h = int((w_cm / 2.54) * dpi_target), int((h_cm / 2.54) * dpi_target)
-        pix_np = np.array(img_input)
-        new_a = np.where(pix_np[:,:,3] < umbral_final, 0, 255).astype(np.uint8)
-        img_final = Image.fromarray(np.stack([pix_np[:,:,0], pix_np[:,:,1], pix_np[:,:,2], new_a], axis=-1)).resize((f_w, f_h), resample=Image.LANCZOS)
+        new_a = np.where(pix_orig[:,:,3] < umbral_final, 0, 255).astype(np.uint8)
+        img_final = Image.fromarray(np.stack([pix_orig[:,:,0], pix_orig[:,:,1], pix_orig[:,:,2], new_a], axis=-1)).resize((f_w, f_h), resample=Image.LANCZOS)
 
-        # --- DESCARGAS ---
+        # --- 5. DESCARGAS ---
         st.markdown("---")
         nombre_base = archivo.name.rsplit('.', 1)[0].upper()
-        
         buf_png = io.BytesIO()
         img_final.save(buf_png, format="PNG", dpi=(dpi_target, dpi_target))
         st.markdown('<div class="btn-png">', unsafe_allow_html=True)
@@ -114,7 +122,7 @@ with st.sidebar:
             st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre_base}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR HÍBRIDO RÁPIDO ---
+# --- VISOR HÍBRIDO ---
 if archivo:
     v_buf = io.BytesIO()
     img_input.resize((1000, int(1000 * h_orig_px / w_orig_px))).save(v_buf, format="PNG")
@@ -165,7 +173,7 @@ if archivo:
 
         function rc() {{
             s = Math.min(window.innerWidth/im.width, window.innerHeight/im.height)*0.85;
-            vx = (window.innerWidth - im.width*s)/2; vy = (window.innerHeight - img.height*s)/2;
+            vx = (window.innerWidth - im.width*s)/2; vy = (window.innerHeight - im.height*s)/2;
             sessionStorage.setItem('v_r', lastR);
             render();
         }}
