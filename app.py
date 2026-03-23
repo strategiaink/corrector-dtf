@@ -14,7 +14,7 @@ except ImportError:
 
 st.set_page_config(page_title="CORRECTOR STRATEGIA INK", layout="wide", initial_sidebar_state="expanded")
 
-# CSS ESTABLE
+# CSS ESTABLE Y OPTIMIZADO
 st.markdown("""
     <style>
     .main { overflow: hidden; }
@@ -26,8 +26,6 @@ st.markdown("""
     .btn-pdf > div > button { background-color: #d93025 !important; color: white !important; font-weight: bold !important; height: 3em; }
     .btn-center > div > button { background-color: #d4ff00 !important; color: black !important; font-weight: bold !important; margin-top: 10px; }
     .status-box { padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; border: 1px solid; }
-    .status-clean { background-color: rgba(36, 161, 72, 0.1); border-color: #24a148; color: #24a148; }
-    .status-dirty { background-color: rgba(255, 165, 0, 0.1); border-color: orange; color: orange; }
     header, footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
@@ -39,19 +37,24 @@ PRESETS = {
     "A4 (21 x 29.7 cm)": (21.0, 29.7)
 }
 
+# CACHÉ PARA LA IMAGEN ORIGINAL (No se vuelve a leer del disco)
+@st.cache_data(show_spinner=False)
+def cargar_imagen(file):
+    img = Image.open(file).convert("RGBA")
+    return img, np.array(img)
+
 with st.sidebar:
     st.markdown('<div class="sidebar-title">CORRECTOR STRATEGIA</div>', unsafe_allow_html=True)
     archivo = st.file_uploader("Subir Imagen", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
     
     if archivo:
-        img_input = Image.open(archivo).convert("RGBA")
-        pix_orig = np.array(img_input)
+        img_input, pix_orig = cargar_imagen(archivo)
         
         # 1. ANALIZADOR
         if np.any((pix_orig[:,:,3] > 0) & (pix_orig[:,:,3] < 255)):
-            st.markdown('<div class="status-box status-dirty">⚠️ TIENE SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
+            st.markdown('<div style="color:orange; border:1px solid orange; padding:10px; border-radius:8px; text-align:center; font-weight:bold;">⚠️ SEMITRANSPARENCIAS</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="status-box status-clean">✅ LIMPIO</div>', unsafe_allow_html=True)
+            st.markdown('<div style="color:#24a148; border:1px solid #24a148; padding:10px; border-radius:8px; text-align:center; font-weight:bold;">✅ LIMPIO</div>', unsafe_allow_html=True)
 
         # 2. CONFIGURACIÓN VISOR
         st.markdown('<span class="step-label">Configuración del Visor</span>', unsafe_allow_html=True)
@@ -86,22 +89,23 @@ with st.sidebar:
                 px_h = st.number_input("Alto (px)", value=int(alto_orig) if mantener else 0)
                 h_cm = (px_h * 2.54) / dpi_target
 
-        # 4. CORRECCIÓN (UMBRAL)
+        # 4. CORRECCIÓN (UMBRAL) - PROCESADO RÁPIDO
         st.markdown('<span class="step-label">2. Corrección de Bordes</span>', unsafe_allow_html=True)
         umbral = st.slider("Umbral de corte", 1, 254, 128)
         
-        # Botón Centrar Imagen en Sidebar
         st.markdown('<div class="btn-center">', unsafe_allow_html=True)
         if st.button("CENTRAR IMAGEN"):
             st.session_state['reset_visor'] = st.session_state.get('reset_visor', 0) + 1
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Procesamiento
+        # PROCESO DE IMAGEN (Optimizado)
         f_w, f_h = int((w_cm / 2.54) * dpi_target), int((h_cm / 2.54) * dpi_target)
-        img_res = img_input.resize((f_w, f_h), resample=Image.LANCZOS)
-        dat_np = np.array(img_res)
-        new_a = np.where(dat_np[:,:,3] < umbral, 0, 255).astype(np.uint8)
-        img_final = Image.fromarray(np.stack([dat_np[:,:,0], dat_np[:,:,1], dat_np[:,:,2], new_a], axis=-1))
+        
+        # Aplicamos umbral directamente sobre la matriz original para velocidad
+        new_a = np.where(pix_orig[:,:,3] < umbral, 0, 255).astype(np.uint8)
+        img_full_res = Image.fromarray(np.stack([pix_orig[:,:,0], pix_orig[:,:,1], pix_orig[:,:,2], new_a], axis=-1))
+        # Solo redimensionamos para la descarga final
+        img_final = img_full_res.resize((f_w, f_h), resample=Image.LANCZOS)
 
         # 5. BOTONES DE DESCARGA
         st.markdown("---")
@@ -124,13 +128,14 @@ with st.sidebar:
             st.download_button("📄 DESCARGAR PDF (DTF)", buf_pdf.getvalue(), f"P000 | {nombre_base}.PDF", "application/pdf")
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VISOR CON PERSISTENCIA ---
+# --- VISOR TURBO CON PERSISTENCIA ---
 if archivo:
+    # Generamos una miniatura rápida para el visor (vuela el slider)
     v_buf = io.BytesIO()
-    img_final.resize((1000, int(1000 * f_h / f_w)), resample=Image.NEAREST).save(v_buf, format="PNG")
+    # Reducimos a un ancho fijo de 1000px solo para previsualización fluida
+    img_full_res.resize((1000, int(1000 * alto_orig / ancho_orig)), resample=Image.NEAREST).save(v_buf, format="PNG", optimize=True)
     img_b64 = base64.b64encode(v_buf.getvalue()).decode()
     
-    # Trigger para reset
     reset_val = st.session_state.get('reset_visor', 0)
     
     st.components.v1.html(f"""
@@ -141,7 +146,6 @@ if archivo:
         const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d'), img = new Image();
         img.src = "data:image/png;base64,{img_b64}";
         
-        // Recuperar estado previo o valores por defecto
         let s = parseFloat(sessionStorage.getItem('v_s')) || 0;
         let vx = parseFloat(sessionStorage.getItem('v_vx')) || 0;
         let vy = parseFloat(sessionStorage.getItem('v_vy')) || 0;
@@ -165,12 +169,7 @@ if archivo:
 
         img.onload = () => {{
             canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-            // Si hubo un click en "Centrar" o es la primera vez (s=0)
-            if (s === 0 || lastReset > storedReset) {{
-                rc();
-            }} else {{
-                draw();
-            }}
+            if (s === 0 || lastReset > storedReset) {{ rc(); }} else {{ draw(); }}
         }};
 
         function draw() {{
